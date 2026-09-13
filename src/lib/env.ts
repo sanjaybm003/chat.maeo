@@ -1,3 +1,5 @@
+import { isLocalHostname } from "@/lib/origin";
+
 /**
  * Public runtime configuration. Values are read lazily so `next build` works
  * without secrets, but any real use without them fails loudly and clearly.
@@ -18,12 +20,26 @@ function stripTrailingSlash(url: string) {
 }
 
 /**
+ * Vercel serves every deployment over HTTPS. An http:// site URL there would
+ * put links on an address that Supabase's redirect allow-list doesn't match.
+ */
+function normalizeSiteUrl(raw: string) {
+  const url = stripTrailingSlash(raw.trim());
+  if (!process.env.VERCEL || !url.startsWith("http://")) return url;
+  try {
+    return isLocalHostname(new URL(url).hostname) ? url : `https://${url.slice("http://".length)}`;
+  } catch {
+    return url;
+  }
+}
+
+/**
  * The public address of this deployment. An explicit NEXT_PUBLIC_SITE_URL
  * wins; on Vercel, when it's unset, the project's production domain (or a
  * preview deployment's own URL) is used, so nothing has to be kept in sync.
  */
 function configuredSiteUrl(): string | null {
-  if (process.env.NEXT_PUBLIC_SITE_URL) return stripTrailingSlash(process.env.NEXT_PUBLIC_SITE_URL);
+  if (process.env.NEXT_PUBLIC_SITE_URL) return normalizeSiteUrl(process.env.NEXT_PUBLIC_SITE_URL);
 
   const vercelEnv = process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
   const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL;

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "./env";
 
 const SITE_VARIABLES = [
+  "VERCEL",
   "NEXT_PUBLIC_SITE_URL",
   "VERCEL_ENV",
   "NEXT_PUBLIC_VERCEL_ENV",
@@ -23,6 +24,20 @@ describe("env.siteUrl", () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "chatmaeo.vercel.app");
     expect(env.siteUrl).toBe("https://chat.example.com");
+  });
+
+  it("upgrades an http:// site URL to https:// on Vercel", () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "http://chatmaeo.vercel.app");
+    expect(env.siteUrl).toBe("https://chatmaeo.vercel.app");
+  });
+
+  it("leaves http:// alone off Vercel and for local addresses", () => {
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "http://192.168.0.20:3000");
+    expect(env.siteUrl).toBe("http://192.168.0.20:3000");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "http://localhost:3000");
+    expect(env.siteUrl).toBe("http://localhost:3000");
   });
 
   it("uses the Vercel production domain when the site URL is unset", () => {

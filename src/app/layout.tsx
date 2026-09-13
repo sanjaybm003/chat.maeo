@@ -63,7 +63,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <head>
         <InlineScript html={THEME_SCRIPT} nonce={nonce} />
       </head>
-      <body>
+      {/* Extensions such as ColorZilla or Grammarly add attributes to <body> before
+          React hydrates. This ignores attribute differences on <body> only; its
+          children are still checked. */}
+      <body suppressHydrationWarning>
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

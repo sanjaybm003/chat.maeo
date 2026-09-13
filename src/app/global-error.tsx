@@ -4,6 +4,7 @@ export default function GlobalError({ reset }: { error: Error & { digest?: strin
   return (
     <html lang="en">
       <body
+        suppressHydrationWarning
         style={{
           margin: 0,
           minHeight: "100dvh",
