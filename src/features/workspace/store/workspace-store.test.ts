@@ -33,6 +33,7 @@ function conversation(id: string, patch: Partial<Conversation> = {}): Conversati
       { userId: "them", joinedAt: "2026-09-13T09:00:00Z", lastReadAt: "2026-09-13T09:00:00Z" },
     ],
     lastMessage: null,
+    agentId: null,
     ...patch,
   };
 }
@@ -43,10 +44,12 @@ function message(id: string, patch: Partial<Message> = {}): Message {
     id,
     conversationId: "c1",
     senderId: "them",
+    agentId: null,
     kind: "text",
     body: id,
     attachments: [],
     meta: {},
+    run: null,
     replyToId: null,
     replyTo: null,
     editedAt: null,
@@ -67,6 +70,7 @@ function makeStore(conversations: Conversation[] = [conversation("c1")]) {
     myRole: "owner",
     workspaces: [],
     members: [],
+    ai: { ready: true, models: [], agents: [], credits: null },
     conversations,
     pendingInvitations: [],
   });
@@ -149,6 +153,8 @@ describe("conversations and presence", () => {
         lastMessage: {
           id: "m9",
           senderId: "them",
+          agentId: null,
+          agentStatus: null,
           kind: "text",
           body: "hi",
           meta: {},

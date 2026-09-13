@@ -1,5 +1,5 @@
 import { previewOf } from "@/lib/mappers";
-import type { Conversation, Message } from "@/types/domain";
+import type { AgentStream, Conversation, Message } from "@/types/domain";
 
 import type { SyncCursor, Thread } from "./types";
 
@@ -87,6 +87,18 @@ export function mergeIntoThread(thread: Thread, incoming: Message[], keepReactio
     applied.push(merged);
   }
   return { thread: { ...thread, messages, cursor: advanceCursor(thread.cursor, applied) }, applied };
+}
+
+export const isRunLive = (message: Pick<Message, "run">) =>
+  message.run?.status === "thinking" || message.run?.status === "working";
+
+/** Drops live streams for agent replies that just finished, or null if none did. */
+export function withoutFinishedStreams(streams: Record<string, AgentStream>, messages: Message[]) {
+  const finished = messages.filter((message) => message.run && !isRunLive(message) && streams[message.id]);
+  if (finished.length === 0) return null;
+  const next = { ...streams };
+  for (const message of finished) delete next[message.id];
+  return next;
 }
 
 /** The conversation with its preview moved to the newest of `messages`, or null if unchanged. */

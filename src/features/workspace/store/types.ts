@@ -1,7 +1,10 @@
 import type { StoreApi } from "zustand/vanilla";
 
 import type {
+  Agent,
+  AgentStream,
   Conversation,
+  CreditAccount,
   Member,
   Message,
   PendingInvitation,
@@ -13,6 +16,15 @@ import type {
   WorkspaceSummary,
 } from "@/types/domain";
 
+export interface AiBootstrap {
+  /** False until the AI migration has been applied to the database. */
+  ready: boolean;
+  /** Ids of the models this server has API keys for, in preference order. */
+  models: string[];
+  agents: Agent[];
+  credits: CreditAccount | null;
+}
+
 export interface WorkspaceBootstrap {
   me: Profile;
   workspace: Workspace;
@@ -21,6 +33,7 @@ export interface WorkspaceBootstrap {
   members: Member[];
   conversations: Conversation[];
   pendingInvitations: PendingInvitation[];
+  ai: AiBootstrap;
 }
 
 /** Position in a conversation's change feed: the newest (updated_at, id) seen from the server. */
@@ -132,7 +145,24 @@ export interface UiSlice {
   flagActivityElsewhere: (active: boolean) => void;
 }
 
-export type WorkspaceStoreState = DirectorySlice & ConversationsSlice & ThreadsSlice & PresenceSlice & UiSlice;
+export interface AiSlice {
+  aiReady: boolean;
+  aiModels: string[];
+  /** Every agent this person can see, archived ones included so old replies keep their author. */
+  agents: Record<string, Agent>;
+  credits: CreditAccount | null;
+  /** messageId → live progress of an agent reply that is still being written. */
+  agentStreams: Record<string, AgentStream>;
+
+  upsertAgent: (agent: Agent) => void;
+  removeAgent: (agentId: string) => void;
+  setCredits: (credits: CreditAccount) => void;
+  setCreditBalance: (balance: number) => void;
+  /** Ignored unless the message is a live reply of the same run: a stale or spoofed snapshot never shows. */
+  applyAgentStream: (conversationId: string, messageId: string, stream: AgentStream) => void;
+}
+
+export type WorkspaceStoreState = DirectorySlice & ConversationsSlice & ThreadsSlice & PresenceSlice & UiSlice & AiSlice;
 
 export type SetState = StoreApi<WorkspaceStoreState>["setState"];
 export type GetState = StoreApi<WorkspaceStoreState>["getState"];

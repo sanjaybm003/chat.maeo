@@ -77,11 +77,12 @@ const ConversationRow = memo(function ConversationRow({
   active: boolean;
 }) {
   const members = useWorkspace((state) => state.members);
+  const agents = useWorkspace((state) => state.agents);
   const meId = useWorkspace((state) => state.me.id);
   const slug = useWorkspace((state) => state.workspace.slug);
   const someoneTyping = useWorkspace((state) => Object.keys(state.typing[conversation.id] ?? {}).length > 0);
 
-  const title = conversationTitle(conversation, members, meId);
+  const title = conversationTitle(conversation, members, meId, agents);
   const unread = conversation.unreadCount;
   const lastAt = conversation.lastMessage?.createdAt ?? conversation.lastMessageAt ?? conversation.createdAt;
 
@@ -90,7 +91,7 @@ const ConversationRow = memo(function ConversationRow({
       role="listitem"
       href={routes.conversation(slug, conversation.id)}
       aria-current={active ? "page" : undefined}
-      style={personColorStyle(conversationColor(conversation, members, meId))}
+      style={personColorStyle(conversationColor(conversation, members, meId, agents))}
       className={cn(
         "group relative flex items-center gap-3 rounded-2xl px-2.5 py-2.5 transition-colors duration-150",
         active ? "bg-paper-2 [--avatar-ring:var(--paper-2)]" : "hover:bg-paper [&:hover]:[--avatar-ring:var(--paper)]",
@@ -116,7 +117,7 @@ const ConversationRow = memo(function ConversationRow({
             <span className="truncate text-[13px] font-medium text-person-ink">typing…</span>
           ) : (
             <span className={cn("truncate text-[13px] leading-5", unread > 0 ? "text-ink-2" : "text-ink-3")}>
-              {previewLine(conversation, members, meId)}
+              {previewLine(conversation, members, meId, agents)}
             </span>
           )}
           <CountBadge count={unread} muted={conversation.muted} className="ml-auto shrink-0" />

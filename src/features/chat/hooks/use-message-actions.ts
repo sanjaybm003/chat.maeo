@@ -59,6 +59,7 @@ export function useMessageActions(conversationId: string) {
             ? {
                 id: replyTo.id,
                 senderId: replyTo.senderId,
+                agentId: replyTo.agentId,
                 body: replyTo.body.slice(0, 200),
                 attachmentCount: replyTo.attachments.length,
                 deletedAt: replyTo.deletedAt,

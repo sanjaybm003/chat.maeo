@@ -13,6 +13,7 @@ const SECTIONS: Array<{ key: SectionKey; label: string }> = [
   { key: "profile", label: "Profile" },
   { key: "preferences", label: "Preferences" },
   { key: "workspace", label: "Workspace" },
+  { key: "ai", label: "AI credits" },
   { key: "account", label: "Account" },
 ];
 

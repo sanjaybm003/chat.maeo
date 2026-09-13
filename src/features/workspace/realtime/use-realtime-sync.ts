@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { toast } from "sonner";
 
+import { fetchAgent } from "@/features/ai/api";
 import { watchActivity } from "@/lib/browser/activity";
 import { startTabCoordinator } from "@/lib/browser/tab-coordinator";
 import { logger } from "@/lib/logger";
@@ -44,6 +45,8 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
 
     async function handleMessageCreated(message: Message) {
       const fromOthers = message.senderId !== meId && message.kind === "text";
+      // An agent reply arrives empty and fills in as it streams; it counts as unread, but a chime would ring before there's anything to read.
+      const alert = fromOthers && !message.agentId;
 
       if (!state().conversations[message.conversationId]) {
         if (!foreignConversations.has(message.conversationId)) {
@@ -52,13 +55,13 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
           if (conversation) {
             state().upsertConversation(conversation);
             state().receiveMessage(message);
-            if (fromOthers && !conversation.muted) notifier.notify(message, conversation);
+            if (alert && !conversation.muted) notifier.notify(message, conversation);
             return;
           }
           // Realtime feeds are per person, not per workspace.
           foreignConversations.add(message.conversationId);
         }
-        if (fromOthers) state().flagActivityElsewhere(true);
+        if (alert) state().flagActivityElsewhere(true);
         return;
       }
 
@@ -69,9 +72,16 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
       if (!viewing) state().incrementUnread(message.conversationId);
 
       const conversation = state().conversations[message.conversationId];
-      if (conversation && !conversation.muted && (!viewing || !document.hasFocus())) {
+      if (alert && conversation && !conversation.muted && (!viewing || !document.hasFocus())) {
         notifier.notify(message, conversation);
       }
+    }
+
+    async function refreshAgent(agentId: string) {
+      const agent = await fetchAgent(agentId).catch(() => undefined);
+      if (disposed || agent === undefined) return;
+      if (agent) state().upsertAgent(agent);
+      else state().removeAgent(agentId);
     }
 
     async function refreshConversation(conversationId: string) {
@@ -134,6 +144,8 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
         onMemberChanged: (userId) => void refreshMember(userId),
         onWorkspaceUpdated: () => void refreshWorkspace(),
         onPresence: (entries) => state().setPresence(entries),
+        onCreditsChanged: (balance) => state().setCreditBalance(balance),
+        onAgentChanged: (agentId) => void refreshAgent(agentId),
       },
     );
     void engine.start();

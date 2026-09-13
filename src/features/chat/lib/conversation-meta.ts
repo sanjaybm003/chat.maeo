@@ -1,8 +1,10 @@
+import { plainText } from "@/features/ai/lib/rich-text";
 import { colorFromSeed } from "@/lib/colors";
 import { firstNameOf, joinNames, nameOf, pluralize } from "@/lib/utils";
-import type { Conversation, Member, MessagePreview, PersonColor, SystemMeta } from "@/types/domain";
+import type { Agent, Conversation, Member, MessagePreview, PersonColor, SystemMeta } from "@/types/domain";
 
 type Members = Record<string, Member>;
+type Agents = Record<string, Agent>;
 
 export function otherParticipantIds(conversation: Conversation, meId: string) {
   return conversation.participants.map((participant) => participant.userId).filter((id) => id !== meId);
@@ -18,7 +20,13 @@ export function conversationPeople(conversation: Conversation, members: Members,
   return otherParticipantIds(conversation, meId).map((id) => members[id] ?? null);
 }
 
-export function conversationTitle(conversation: Conversation, members: Members, meId: string) {
+/** The agent an agent room belongs to; null for every other conversation. */
+export function roomAgent(conversation: Conversation, agents: Agents | undefined): Agent | null {
+  return conversation.agentId ? (agents?.[conversation.agentId] ?? null) : null;
+}
+
+export function conversationTitle(conversation: Conversation, members: Members, meId: string, agents?: Agents) {
+  if (conversation.agentId) return roomAgent(conversation, agents)?.name ?? "AI agent";
   if (conversation.kind === "direct") {
     return nameOf(directPartner(conversation, members, meId));
   }
@@ -29,7 +37,9 @@ export function conversationTitle(conversation: Conversation, members: Members, 
   return names.length > 0 ? joinNames(names, 3) : "Just you";
 }
 
-export function conversationColor(conversation: Conversation, members: Members, meId: string): PersonColor {
+export function conversationColor(conversation: Conversation, members: Members, meId: string, agents?: Agents): PersonColor {
+  const agent = roomAgent(conversation, agents);
+  if (agent) return agent.color;
   const partner = directPartner(conversation, members, meId);
   return partner?.color ?? colorFromSeed(conversation.id);
 }
@@ -61,10 +71,33 @@ export function attachmentSummary(count: number) {
   return count === 1 ? "Sent an attachment" : `Sent ${pluralize(count, "attachment")}`;
 }
 
-export function previewLine(conversation: Conversation, members: Members, meId: string) {
+/** What an agent reply says so far, for a single line of preview. */
+function agentPreviewContent(preview: MessagePreview) {
+  if (preview.body.trim()) return plainText(preview.body);
+  switch (preview.agentStatus) {
+    case "failed":
+      return "Couldn’t reply";
+    case "cancelled":
+      return "Stopped";
+    case "done":
+      return "No reply";
+    default:
+      return "Thinking…";
+  }
+}
+
+export function previewLine(conversation: Conversation, members: Members, meId: string, agents?: Agents) {
   const preview: MessagePreview | null = conversation.lastMessage;
-  if (!preview) return conversation.kind === "group" ? "New group" : "Say hello";
+  if (!preview) {
+    if (conversation.agentId) return "Ask anything";
+    return conversation.kind === "group" ? "New group" : "Say hello";
+  }
   if (preview.kind === "system") return systemMessageText(preview.meta, preview.senderId, members, meId);
+
+  if (preview.agentId) {
+    const content = preview.deletedAt ? "Message deleted" : agentPreviewContent(preview);
+    return conversation.agentId ? content : `${agents?.[preview.agentId]?.name ?? "Agent"}: ${content}`;
+  }
 
   const content = preview.deletedAt
     ? "Message deleted"
@@ -73,6 +106,8 @@ export function previewLine(conversation: Conversation, members: Members, meId: 
       : attachmentSummary(preview.attachmentCount);
 
   if (preview.senderId === meId) return `You: ${content}`;
-  if (conversation.kind === "group") return `${firstNameOf(preview.senderId ? members[preview.senderId] : null)}: ${content}`;
+  if (conversation.kind === "group" && !conversation.agentId) {
+    return `${firstNameOf(preview.senderId ? members[preview.senderId] : null)}: ${content}`;
+  }
   return content;
 }

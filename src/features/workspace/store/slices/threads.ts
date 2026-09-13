@@ -1,6 +1,6 @@
 import type { Message } from "@/types/domain";
 
-import { advanceCursor, mergeIntoThread, upsertSorted, withLatestPreview } from "../helpers";
+import { advanceCursor, mergeIntoThread, upsertSorted, withLatestPreview, withoutFinishedStreams } from "../helpers";
 import type { SliceCreator, Thread, ThreadsSlice, WorkspaceStoreState } from "../types";
 
 /** Loaded conversations kept in memory; colder ones reload on demand. */
@@ -85,6 +85,8 @@ export const createThreadsSlice: SliceCreator<ThreadsSlice> = (set, get) => {
         const patch: Partial<WorkspaceStoreState> = { threads: { ...state.threads, [conversationId]: next } };
         const conversation = withLatestPreview(state.conversations[conversationId], applied);
         if (conversation) patch.conversations = { ...state.conversations, [conversationId]: conversation };
+        const streams = withoutFinishedStreams(state.agentStreams, applied);
+        if (streams) patch.agentStreams = streams;
         return patch;
       }),
 
@@ -103,6 +105,9 @@ export const createThreadsSlice: SliceCreator<ThreadsSlice> = (set, get) => {
 
         const conversation = withLatestPreview(state.conversations[message.conversationId], [applied]);
         if (conversation) patch.conversations = { ...state.conversations, [message.conversationId]: conversation };
+
+        const streams = withoutFinishedStreams(state.agentStreams, [applied]);
+        if (streams) patch.agentStreams = streams;
 
         if (message.senderId && state.typing[message.conversationId]?.[message.senderId]) {
           const forConversation = { ...state.typing[message.conversationId] };

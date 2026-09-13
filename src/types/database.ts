@@ -19,11 +19,13 @@ export type WorkspaceRole = "owner" | "admin" | "member";
 export type InvitationStatus = "pending" | "accepted" | "revoked";
 export type ConversationKind = "direct" | "group";
 export type MessageKind = "text" | "system";
+export type AiRunStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 type MessageRowWithExtras = {
   id: string;
   conversation_id: string;
   sender_id: string | null;
+  agent_id: string | null;
   kind: MessageKind;
   body: string;
   attachments: Json;
@@ -36,6 +38,16 @@ type MessageRowWithExtras = {
   version: number;
   reactions: Json;
   reply_to: Json | null;
+};
+
+type SearchRow = {
+  id: string;
+  conversation_id: string;
+  sender_id: string | null;
+  body: string;
+  created_at: string;
+  rank: number;
+  agent_id: string | null;
 };
 
 export type Database = {
@@ -157,6 +169,8 @@ export type Database = {
           kind: ConversationKind;
           name: string | null;
           direct_key: string | null;
+          agent_id: string | null;
+          agent_key: string | null;
           created_by: string | null;
           last_message_at: string | null;
           created_at: string;
@@ -197,6 +211,7 @@ export type Database = {
           id: string;
           conversation_id: string;
           sender_id: string | null;
+          agent_id: string | null;
           kind: MessageKind;
           body: string;
           attachments: Json;
@@ -262,6 +277,110 @@ export type Database = {
           action: string;
           target_id: string | null;
           metadata: Json;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      ai_agents: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          created_by: string | null;
+          name: string;
+          handle: string;
+          tagline: string;
+          instructions: string;
+          model: string;
+          tools: string[];
+          starters: string[];
+          color: string;
+          glyph: string;
+          visibility: "workspace" | "private";
+          archived_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          workspace_id: string;
+          created_by: string;
+          name: string;
+          handle: string;
+          tagline?: string;
+          instructions: string;
+          model: string;
+          tools?: string[];
+          starters?: string[];
+          color?: string;
+          glyph?: string;
+          visibility?: "workspace" | "private";
+        };
+        Update: {
+          name?: string;
+          handle?: string;
+          tagline?: string;
+          instructions?: string;
+          model?: string;
+          tools?: string[];
+          starters?: string[];
+          color?: string;
+          glyph?: string;
+          visibility?: "workspace" | "private";
+          archived_at?: string | null;
+        };
+        Relationships: [];
+      };
+      ai_runs: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          kind: "reply" | "architect";
+          agent_id: string | null;
+          conversation_id: string | null;
+          trigger_message_id: string | null;
+          reply_message_id: string | null;
+          triggered_by: string | null;
+          model: string;
+          status: AiRunStatus;
+          cancel_requested: boolean;
+          steps: Json;
+          input_tokens: number;
+          output_tokens: number;
+          tool_calls: number;
+          credits_reserved: number;
+          credits_charged: number;
+          error: string | null;
+          created_at: string;
+          finished_at: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      ai_credit_accounts: {
+        Row: {
+          workspace_id: string;
+          balance: number;
+          reserved: number;
+          lifetime_granted: number;
+          lifetime_used: number;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      ai_credit_ledger: {
+        Row: {
+          id: number;
+          workspace_id: string;
+          delta: number;
+          balance_after: number;
+          kind: "grant" | "charge" | "refund" | "adjustment";
+          run_id: string | null;
+          actor_id: string | null;
+          note: string | null;
           created_at: string;
         };
         Insert: never;
@@ -392,6 +511,7 @@ export type Database = {
           unread_count: number;
           participants: Json;
           last_message: Json | null;
+          agent_id: string | null;
         }[];
       };
       create_direct_conversation: {
@@ -442,14 +562,7 @@ export type Database = {
       };
       search_messages: {
         Args: { p_workspace_id: string; p_query: string; p_limit?: number };
-        Returns: {
-          id: string;
-          conversation_id: string;
-          sender_id: string | null;
-          body: string;
-          created_at: string;
-          rank: number;
-        }[];
+        Returns: SearchRow[];
       };
       touch_presence: {
         Args: NoArgs;
@@ -466,6 +579,80 @@ export type Database = {
       health_check: {
         Args: NoArgs;
         Returns: Json;
+      };
+      create_agent_conversation: {
+        Args: { p_agent_id: string };
+        Returns: string;
+      };
+      cancel_ai_run: {
+        Args: { p_run_id: string };
+        Returns: boolean;
+      };
+      ai_usage_summary: {
+        Args: { p_workspace_id: string; p_days?: number; p_time_zone?: string };
+        Returns: Json;
+      };
+      ai_start_reply_run: {
+        Args: {
+          p_user_id: string;
+          p_trigger_message_id: string;
+          p_agent_id: string;
+          p_model: string;
+          p_quote?: boolean;
+        };
+        Returns: {
+          o_run_id: string;
+          o_reply_message_id: string;
+          o_conversation_id: string;
+          o_workspace_id: string;
+          o_created: boolean;
+        }[];
+      };
+      ai_start_architect_run: {
+        Args: { p_user_id: string; p_workspace_id: string; p_model: string };
+        Returns: string;
+      };
+      ai_reserve_credits: {
+        Args: { p_run_id: string; p_amount: number; p_minimum?: number };
+        Returns: number;
+      };
+      ai_settle_credits: {
+        Args: {
+          p_run_id: string;
+          p_credits: number;
+          p_input_tokens?: number;
+          p_output_tokens?: number;
+          p_tool_calls?: number;
+        };
+        Returns: number;
+      };
+      ai_finish_run: {
+        Args: {
+          p_run_id: string;
+          p_status: "succeeded" | "failed" | "cancelled";
+          p_body?: string | null;
+          p_steps?: Json | null;
+          p_error?: string | null;
+        };
+        Returns: boolean;
+      };
+      ai_fail_stale_runs: {
+        Args: { p_workspace_id?: string | null };
+        Returns: number;
+      };
+      ai_broadcast: {
+        Args: { p_conversation_id: string; p_payload: Json };
+        Returns: undefined;
+      };
+      ai_search_messages_for: {
+        Args: {
+          p_user_id: string;
+          p_workspace_id: string;
+          p_audience_conversation_id: string;
+          p_query: string;
+          p_limit?: number;
+        };
+        Returns: SearchRow[];
       };
     };
     Enums: {

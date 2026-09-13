@@ -5,12 +5,17 @@ import { toast } from "sonner";
 
 import { IconButton } from "@/components/ui/icon-button";
 import { IconArrowUp, IconClose, IconPaperclip, IconReply } from "@/components/ui/icons";
+import { AgentAvatar } from "@/features/ai/components/agent-avatar";
+import { matchAgents, MentionMenu } from "@/features/ai/components/mention-menu";
+import { plainText } from "@/features/ai/lib/rich-text";
+import { activeMentionQuery, insertMention } from "@/features/ai/mentions";
+import { agentsToWake } from "@/features/ai/wake";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
 import { personColorStyle } from "@/lib/colors";
 import { MAX_MESSAGE_LENGTH } from "@/lib/constants";
 import { usePreferences } from "@/lib/preferences";
-import { cn, firstNameOf, nameOf } from "@/lib/utils";
-import type { Conversation } from "@/types/domain";
+import { cn, firstNameOf, joinNames, nameOf } from "@/lib/utils";
+import type { Agent, Conversation } from "@/types/domain";
 
 import type { AttachmentUploads } from "../hooks/use-attachment-uploads";
 import { useMessageActions } from "../hooks/use-message-actions";
@@ -29,6 +34,9 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   const store = useWorkspaceStore();
   const me = useWorkspace((state) => state.me);
   const members = useWorkspace((state) => state.members);
+  const agents = useWorkspace((state) => state.agents);
+  const aiReady = useWorkspace((state) => state.aiReady);
+  const outOfCredits = useWorkspace((state) => state.credits !== null && state.credits.balance <= 0);
   const replyToId = useWorkspace((state) => state.replyTargets[conversationId]);
   const replyTo = useWorkspace((state) =>
     replyToId ? (state.threads[conversationId]?.messages.find((message) => message.id === replyToId) ?? null) : null,
@@ -36,6 +44,9 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   const [preferences] = usePreferences();
   const actions = useMessageActions(conversationId);
   const [text, setText] = useState(() => store.getState().drafts[conversationId] ?? "");
+  const [caret, setCaret] = useState(() => text.length);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [dismissedMentionAt, setDismissedMentionAt] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -44,6 +55,13 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   const tooLong = text.length > MAX_MESSAGE_LENGTH;
   const hasContent = text.trim().length > 0 || readyAttachments.length > 0;
   const canSend = hasContent && !uploading && !tooLong;
+
+  // "@que" at the caret opens a picker of agents; Escape dismisses it for that mention only.
+  const mention = aiReady ? activeMentionQuery(text, caret) : null;
+  const suggestions = mention && mention.start !== dismissedMentionAt ? matchAgents(agents, mention.query) : [];
+  const mentionOpen = suggestions.length > 0;
+  const activeMention = Math.min(mentionIndex, Math.max(suggestions.length - 1, 0));
+  const woken = aiReady && text.trim() ? agentsToWake(text, conversation, agents) : [];
 
   useLayoutEffect(() => {
     const element = textareaRef.current;
@@ -56,6 +74,27 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
     if (window.matchMedia("(hover: hover)").matches) textareaRef.current?.focus();
   }, [conversationId, replyToId]);
 
+  function updateText(value: string, nextCaret: number) {
+    setText(value);
+    setCaret(nextCaret);
+    store.getState().setDraft(conversationId, value);
+    if (value) onTyping();
+    else onStopTyping();
+  }
+
+  function pickMention(agent: Agent) {
+    if (!mention) return;
+    const next = insertMention(text, caret, mention.start, agent.handle);
+    updateText(next.text, next.caret);
+    setMentionIndex(0);
+    requestAnimationFrame(() => {
+      const element = textareaRef.current;
+      if (!element) return;
+      element.focus();
+      element.setSelectionRange(next.caret, next.caret);
+    });
+  }
+
   function submit() {
     if (!canSend) {
       if (uploading && hasContent) toast("Still uploading. It’ll be ready in a moment.");
@@ -63,6 +102,8 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
     }
     void actions.send({ body: text.trim(), attachments: readyAttachments, replyTo });
     setText("");
+    setCaret(0);
+    setDismissedMentionAt(null);
     store.getState().setDraft(conversationId, "");
     store.getState().setReplyTarget(conversationId, undefined);
     uploads.clear();
@@ -71,6 +112,25 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
+
+    if (mentionOpen) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setMentionIndex((activeMention + step + suggestions.length) % suggestions.length);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        pickMention(suggestions[activeMention]);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDismissedMentionAt(mention?.start ?? null);
+        return;
+      }
+    }
 
     if (event.key === "Enter") {
       const send = preferences.enterToSend ? !event.shiftKey : event.metaKey || event.ctrlKey;
@@ -110,12 +170,22 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   const placeholder =
     conversation.kind === "direct"
       ? `Message ${firstNameOf(partner, "them")}`
-      : `Message ${conversationTitle(conversation, members, me.id)}`;
+      : `Message ${conversationTitle(conversation, members, me.id, agents)}`;
+
+  const replyAgent = replyTo?.agentId ? (agents[replyTo.agentId] ?? null) : null;
   const replyAuthor = replyTo?.senderId ? members[replyTo.senderId] : null;
+  const replyColor = replyAgent?.color ?? replyAuthor?.color;
+  const replyName =
+    replyTo?.senderId === me.id ? "yourself" : replyTo?.agentId ? (replyAgent?.name ?? "an agent") : nameOf(replyAuthor);
+  const replyText = replyTo ? (replyTo.agentId ? plainText(replyTo.body) : replyTo.body) : "";
 
   return (
     <div className="shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-5">
-      <div className="mx-auto w-full max-w-[880px]">
+      <div className="relative mx-auto w-full max-w-[880px]">
+        {mentionOpen ? (
+          <MentionMenu agents={suggestions} activeIndex={activeMention} onPick={pickMention} onHover={setMentionIndex} />
+        ) : null}
+
         <div
           className={cn(
             "overflow-hidden rounded-[24px] border bg-surface transition-[border-color,box-shadow] duration-150",
@@ -124,13 +194,13 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
           )}
         >
           {replyTo ? (
-            <div className="flex items-center gap-3 border-b border-line px-4 py-2.5" style={replyAuthor ? personColorStyle(replyAuthor.color) : undefined}>
+            <div className="flex items-center gap-3 border-b border-line px-4 py-2.5" style={replyColor ? personColorStyle(replyColor) : undefined}>
               <IconReply size={16} className="shrink-0 text-person" />
               <div className="min-w-0 flex-1 text-[13px]">
                 <p className="text-ink-3">
-                  Replying to <span className="font-semibold text-person-ink">{replyTo.senderId === me.id ? "yourself" : nameOf(replyAuthor)}</span>
+                  Replying to <span className="font-semibold text-person-ink">{replyName}</span>
                 </p>
-                <p className="truncate text-ink-2">{replyTo.body || attachmentSummary(replyTo.attachments.length)}</p>
+                <p className="truncate text-ink-2">{replyText || attachmentSummary(replyTo.attachments.length)}</p>
               </div>
               <button
                 type="button"
@@ -164,16 +234,18 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
               rows={1}
               value={text}
               onChange={(event) => {
-                setText(event.target.value);
-                store.getState().setDraft(conversationId, event.target.value);
-                if (event.target.value) onTyping();
-                else onStopTyping();
+                updateText(event.target.value, event.target.selectionStart);
+                setMentionIndex(0);
               }}
+              onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               onBlur={onStopTyping}
               placeholder={placeholder}
               aria-label={placeholder}
+              aria-autocomplete={aiReady ? "list" : undefined}
+              aria-controls={mentionOpen ? "mention-menu" : undefined}
+              aria-activedescendant={mentionOpen ? `mention-${suggestions[activeMention].id}` : undefined}
               className="max-h-[220px] min-h-9 flex-1 resize-none bg-transparent px-1.5 py-[7px] text-[15px] leading-[22px] text-ink outline-none placeholder:text-ink-4"
             />
             <button
@@ -192,12 +264,20 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
           </div>
         </div>
 
-        <div className="mt-1.5 hidden h-4 items-center justify-between px-3 font-mono text-[10.5px] text-ink-4 sm:flex">
-          <span>
-            {preferences.enterToSend ? "enter to send · shift + enter for a new line" : "ctrl + enter to send"}
-          </span>
+        <div className="mt-1.5 hidden h-4 items-center justify-between gap-3 px-3 font-mono text-[10.5px] text-ink-4 sm:flex">
+          {woken.length > 0 ? (
+            <span className="flex min-w-0 items-center gap-1.5 text-ink-3">
+              <AgentAvatar agent={woken[0]} size="xs" className="size-4 rounded-[5px]" />
+              <span className="truncate">{joinNames(woken.map((agent) => agent.name), 3)} will reply</span>
+              {outOfCredits ? <span className="shrink-0 text-danger">· out of AI credits</span> : null}
+            </span>
+          ) : (
+            <span>
+              {preferences.enterToSend ? "enter to send · shift + enter for a new line" : "ctrl + enter to send"}
+            </span>
+          )}
           {text.length > MAX_MESSAGE_LENGTH - 400 ? (
-            <span className={cn(tooLong && "text-danger")}>
+            <span className={cn("shrink-0", tooLong && "text-danger")}>
               {text.length} / {MAX_MESSAGE_LENGTH}
             </span>
           ) : null}

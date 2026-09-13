@@ -10,11 +10,15 @@ import { IconCopy, IconMore, IconPencil, IconReply, IconSmile, IconTrash } from 
 import { LocalTime } from "@/components/ui/local-time";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Tooltip } from "@/components/ui/tooltip";
+import { AgentAvatar, AgentTag } from "@/features/ai/components/agent-avatar";
+import { AgentReplyBody, AgentReplyFooter } from "@/features/ai/components/agent-reply";
+import { plainText } from "@/features/ai/lib/rich-text";
+import { isRunLive } from "@/features/workspace/store/helpers";
 import { useWorkspace } from "@/features/workspace/store/workspace-provider";
 import { personColorStyle } from "@/lib/colors";
 import { MAX_MESSAGE_LENGTH } from "@/lib/constants";
 import { cn, joinNames, nameOf } from "@/lib/utils";
-import type { Member, Message, PersonColor, ReplyPreview } from "@/types/domain";
+import type { Agent, Member, Message, PersonColor, ReplyPreview } from "@/types/domain";
 
 import type { MessageActions } from "../hooks/use-message-actions";
 import { attachmentSummary } from "../lib/conversation-meta";
@@ -26,6 +30,8 @@ import { ReactionPicker } from "./reaction-picker";
 interface MessageItemProps {
   message: Message;
   sender: Member | null;
+  /** The agent that wrote this message, when an agent did. */
+  agent: Agent | null;
   mine: boolean;
   myColor: PersonColor;
   startsGroup: boolean;
@@ -40,6 +46,7 @@ interface MessageItemProps {
 export const MessageItem = memo(function MessageItem({
   message,
   sender,
+  agent,
   mine,
   myColor,
   startsGroup,
@@ -57,9 +64,12 @@ export const MessageItem = memo(function MessageItem({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const deleted = Boolean(message.deletedAt);
-  const emojiOnly = !deleted && message.attachments.length === 0 && !message.replyTo && isEmojiOnly(message.body);
+  const isAgent = Boolean(message.agentId);
+  const live = isRunLive(message);
+  const emojiOnly =
+    !deleted && !isAgent && message.attachments.length === 0 && !message.replyTo && isEmojiOnly(message.body);
   const hasText = !deleted && message.body.length > 0;
-  const interactive = !deleted && message.delivery === "sent" && !editing;
+  const interactive = !deleted && message.delivery === "sent" && !editing && !live;
 
   function handleBubbleClick() {
     if (window.matchMedia("(hover: none)").matches) setTapped((value) => !value);
@@ -85,13 +95,31 @@ export const MessageItem = memo(function MessageItem({
       )}
     >
       {!mine ? (
-        <div className="w-9 shrink-0 pt-0.5">{startsGroup ? <Avatar person={sender} size="md" /> : null}</div>
+        <div className="w-9 shrink-0 pt-0.5">
+          {startsGroup ? (
+            isAgent ? <AgentAvatar agent={agent} size="md" working={live} /> : <Avatar person={sender} size="md" />
+          ) : null}
+        </div>
       ) : null}
 
-      <div className={cn("flex min-w-0 max-w-[min(80%,640px)] flex-col", mine ? "items-end" : "items-start")}>
+      <div
+        className={cn(
+          "flex min-w-0 flex-col",
+          isAgent ? "max-w-[min(88%,720px)]" : "max-w-[min(80%,640px)]",
+          mine ? "items-end" : "items-start",
+        )}
+      >
         {startsGroup ? (
           <div className={cn("mb-1 flex items-baseline gap-2 px-1", mine && "flex-row-reverse")}>
-            {showName && !mine ? (
+            {isAgent ? (
+              <span
+                className="flex items-center gap-1.5 self-center text-[13px] font-semibold text-person-ink"
+                style={agent ? personColorStyle(agent.color) : undefined}
+              >
+                {agent?.name ?? "Removed agent"}
+                <AgentTag />
+              </span>
+            ) : showName && !mine ? (
               <span className="text-[13px] font-semibold text-person-ink" style={sender ? personColorStyle(sender.color) : undefined}>
                 {nameOf(sender)}
               </span>
@@ -126,8 +154,9 @@ export const MessageItem = memo(function MessageItem({
               ) : (
                 <>
                   {message.replyTo ? <ReplyQuote reply={message.replyTo} onJumpTo={onJumpTo} /> : null}
-                  {message.attachments.length > 0 ? <AttachmentGrid attachments={message.attachments} /> : null}
-                  {hasText ? (
+                  {isAgent ? <AgentReplyBody message={message} /> : null}
+                  {!isAgent && message.attachments.length > 0 ? <AttachmentGrid attachments={message.attachments} /> : null}
+                  {!isAgent && hasText ? (
                     <div className={cn("whitespace-pre-wrap", !emojiOnly && "px-3.5 py-2")}>
                       {emojiOnly ? message.body : formatMessageBody(message.body)}
                       {message.editedAt && !emojiOnly ? (
@@ -193,6 +222,8 @@ export const MessageItem = memo(function MessageItem({
           ) : null}
         </div>
 
+        {isAgent && !deleted ? <AgentReplyFooter message={message} /> : null}
+
         {message.reactions.length > 0 && !deleted ? (
           <ReactionPills message={message} mine={mine} myColor={myColor} actions={actions} />
         ) : null}
@@ -242,6 +273,10 @@ function ToolButton({ label, className, children, ...props }: ComponentProps<"bu
 
 function ReplyQuote({ reply, onJumpTo }: { reply: ReplyPreview; onJumpTo: (messageId: string) => void }) {
   const author = useWorkspace((state) => (reply.senderId ? state.members[reply.senderId] : null));
+  const agent = useWorkspace((state) => (reply.agentId ? state.agents[reply.agentId] : null));
+  const color = agent?.color ?? author?.color;
+  const body = reply.agentId ? plainText(reply.body) : reply.body;
+
   return (
     <button
       type="button"
@@ -249,12 +284,14 @@ function ReplyQuote({ reply, onJumpTo }: { reply: ReplyPreview; onJumpTo: (messa
         event.stopPropagation();
         onJumpTo(reply.id);
       }}
-      style={author ? personColorStyle(author.color) : undefined}
+      style={color ? personColorStyle(color) : undefined}
       className="mx-1.5 mt-1.5 flex w-[calc(100%-0.75rem)] min-w-[180px] flex-col rounded-[13px] border-l-[3px] border-person bg-[color-mix(in_srgb,var(--ink)_5%,transparent)] px-2.5 py-1.5 text-left"
     >
-      <span className="text-[12px] font-semibold text-person-ink">{nameOf(author)}</span>
+      <span className="text-[12px] font-semibold text-person-ink">
+        {reply.agentId ? (agent?.name ?? "Removed agent") : nameOf(author)}
+      </span>
       <span className="line-clamp-2 text-[13px] leading-snug text-ink-2">
-        {reply.deletedAt ? "Deleted message" : reply.body || attachmentSummary(reply.attachmentCount)}
+        {reply.deletedAt ? "Deleted message" : body || attachmentSummary(reply.attachmentCount)}
       </span>
     </button>
   );

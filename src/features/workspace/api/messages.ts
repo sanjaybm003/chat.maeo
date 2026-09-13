@@ -104,6 +104,7 @@ export async function searchMessages(workspaceId: string, query: string) {
     id: row.id,
     conversationId: row.conversation_id,
     senderId: row.sender_id,
+    agentId: row.agent_id ?? null,
     body: row.body,
     createdAt: row.created_at,
     rank: row.rank,

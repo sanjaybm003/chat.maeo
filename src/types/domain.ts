@@ -74,6 +74,9 @@ export interface SystemMeta {
 export interface MessagePreview {
   id: string;
   senderId: string | null;
+  agentId: string | null;
+  /** For agent replies: how the run is going, so an empty reply previews honestly. */
+  agentStatus: AgentRunStatus | null;
   kind: MessageKind;
   body: string;
   meta: SystemMeta;
@@ -94,6 +97,8 @@ export interface Conversation {
   unreadCount: number;
   participants: Participant[];
   lastMessage: MessagePreview | null;
+  /** Set for a private room between one person and one agent. */
+  agentId: string | null;
 }
 
 export interface Attachment {
@@ -113,6 +118,7 @@ export interface Reaction {
 export interface ReplyPreview {
   id: string;
   senderId: string | null;
+  agentId: string | null;
   body: string;
   attachmentCount: number;
   deletedAt: string | null;
@@ -125,10 +131,14 @@ export interface Message {
   id: string;
   conversationId: string;
   senderId: string | null;
+  /** Set when an AI agent wrote the message. */
+  agentId: string | null;
   kind: MessageKind;
   body: string;
   attachments: Attachment[];
   meta: SystemMeta;
+  /** Present on agent replies: how the run that wrote it is going. */
+  run: AgentRun | null;
   replyToId: string | null;
   replyTo: ReplyPreview | null;
   editedAt: string | null;
@@ -151,4 +161,84 @@ export interface PendingInvitation {
   inviterName: string;
   memberCount: number;
   expiresAt: string;
+}
+
+// AI agents ───────────────────────────────────────────────────────────────────
+
+export const AGENT_TOOL_IDS = ["history", "search", "directory", "web"] as const;
+export type AgentToolId = (typeof AGENT_TOOL_IDS)[number];
+
+export const AGENT_GLYPHS = ["orbit", "prism", "wave", "spark", "grid", "bloom"] as const;
+export type AgentGlyph = (typeof AGENT_GLYPHS)[number];
+
+export type AgentVisibility = "workspace" | "private";
+
+export interface Agent {
+  id: string;
+  workspaceId: string;
+  createdBy: string | null;
+  name: string;
+  handle: string;
+  tagline: string;
+  instructions: string;
+  model: string;
+  tools: AgentToolId[];
+  starters: string[];
+  color: PersonColor;
+  glyph: AgentGlyph;
+  visibility: AgentVisibility;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** thinking → working (text arriving) → done | failed | cancelled */
+export type AgentRunStatus = "thinking" | "working" | "done" | "failed" | "cancelled";
+
+export interface AgentRunStep {
+  kind: "read" | "tool" | "web" | "note";
+  label: string;
+}
+
+export interface AgentRun {
+  runId: string;
+  status: AgentRunStatus;
+  model: string | null;
+  /** The person whose message started the run; they (or an admin) can stop it. */
+  requestedBy: string | null;
+  steps: AgentRunStep[];
+  credits: number | null;
+  error: string | null;
+}
+
+/** Live progress of a reply that is still being written, from the conversation channel. */
+export interface AgentStream {
+  runId: string;
+  seq: number;
+  status: "thinking" | "working";
+  text: string;
+  steps: AgentRunStep[];
+  receivedAt: number;
+}
+
+export interface CreditAccount {
+  balance: number;
+  reserved: number;
+  lifetimeGranted: number;
+  lifetimeUsed: number;
+}
+
+export interface UsageBucket {
+  credits: number;
+  runs: number;
+}
+
+export interface UsageSummary {
+  timeZone: string;
+  since: string;
+  account: CreditAccount | null;
+  days: (UsageBucket & { day: string })[];
+  agents: (UsageBucket & { agentId: string | null })[];
+  models: (UsageBucket & { model: string })[];
+  people: (UsageBucket & { userId: string | null })[];
 }

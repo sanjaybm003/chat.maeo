@@ -6,9 +6,10 @@ import { useState, type ReactNode } from "react";
 
 import { SectionLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
-import { IconCompose, IconSearch, IconSliders, IconUserPlus, IconUsers } from "@/components/ui/icons";
+import { IconCompose, IconSearch, IconSliders, IconSpark, IconUserPlus, IconUsers } from "@/components/ui/icons";
 import { Kbd } from "@/components/ui/kbd";
 import { Segmented } from "@/components/ui/segmented";
+import { CreditsMeter } from "@/features/ai/components/credits-meter";
 import { useIsMac } from "@/hooks/use-hydrated";
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,8 @@ export function Sidebar({ className }: { className?: string }) {
   const openDialog = useWorkspace((state) => state.openDialog);
   const slug = useWorkspace((state) => state.workspace.slug);
   const memberCount = useWorkspace((state) => Object.keys(state.members).length);
+  const aiReady = useWorkspace((state) => state.aiReady);
+  const agentCount = useWorkspace((state) => Object.values(state.agents).filter((agent) => !agent.archivedAt).length);
   const unreadChats = useWorkspace(
     (state) => Object.values(state.conversations).filter((item) => item.unreadCount > 0).length,
   );
@@ -75,6 +78,15 @@ export function Sidebar({ className }: { className?: string }) {
       <ConversationList filter={filter} className="min-h-0 flex-1" />
 
       <nav className="flex flex-col gap-0.5 border-t border-line p-2" aria-label="Workspace">
+        {aiReady ? (
+          <NavItem
+            href={routes.agents(slug)}
+            active={pathname.startsWith(routes.agents(slug))}
+            icon={<IconSpark />}
+            label="Agents"
+            meta={agentCount > 0 ? String(agentCount) : undefined}
+          />
+        ) : null}
         <NavItem
           href={routes.contacts(slug)}
           active={pathname.startsWith(routes.contacts(slug))}
@@ -89,6 +101,7 @@ export function Sidebar({ className }: { className?: string }) {
           icon={<IconSliders />}
           label="Settings"
         />
+        {aiReady ? <CreditsMeter className="mt-1" /> : null}
       </nav>
 
       <div className="border-t border-line p-2">

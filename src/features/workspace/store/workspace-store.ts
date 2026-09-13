@@ -1,5 +1,6 @@
 import { createStore } from "zustand/vanilla";
 
+import { createAiSlice } from "./slices/ai";
 import { createConversationsSlice } from "./slices/conversations";
 import { createDirectorySlice } from "./slices/directory";
 import { createPresenceSlice } from "./slices/presence";
@@ -8,6 +9,7 @@ import { createUiSlice } from "./slices/ui";
 import type { WorkspaceBootstrap, WorkspaceStoreState } from "./types";
 
 export type {
+  AiBootstrap,
   ConnectionState,
   DialogState,
   PresenceEntry,
@@ -24,6 +26,7 @@ export type {
  *   threads        loaded messages, sync cursors, eviction
  *   presence       online/away, typing, connection state
  *   ui             drafts, reply targets, dialogs
+ *   ai             agents, credits, live agent replies
  */
 export function createWorkspaceStore(bootstrap: WorkspaceBootstrap) {
   return createStore<WorkspaceStoreState>()((set, get) => ({
@@ -32,6 +35,7 @@ export function createWorkspaceStore(bootstrap: WorkspaceBootstrap) {
     ...createThreadsSlice(set, get, bootstrap),
     ...createPresenceSlice(set, get, bootstrap),
     ...createUiSlice(set, get, bootstrap),
+    ...createAiSlice(set, get, bootstrap),
   }));
 }
 

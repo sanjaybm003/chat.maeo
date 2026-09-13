@@ -11,6 +11,7 @@ import {
   IconMoon,
   IconSearch,
   IconSliders,
+  IconSpark,
   IconSun,
   IconUserPlus,
   IconUsers,
@@ -18,6 +19,8 @@ import {
 import { Kbd } from "@/components/ui/kbd";
 import { LocalTime } from "@/components/ui/local-time";
 import { Spinner } from "@/components/ui/spinner";
+import { AgentAvatar } from "@/features/ai/components/agent-avatar";
+import { useOpenAgentRoom } from "@/features/ai/hooks/use-open-agent-room";
 import { conversationTitle } from "@/features/chat/lib/conversation-meta";
 import { readPreferences, resolveTheme, usePreferences } from "@/lib/preferences";
 import { rankItems } from "@/lib/search/fuzzy";
@@ -104,8 +107,11 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const workspace = useWorkspace((state) => state.workspace);
   const online = useWorkspace((state) => state.online);
   const openDialog = useWorkspace((state) => state.openDialog);
+  const agents = useWorkspace((state) => state.agents);
+  const aiReady = useWorkspace((state) => state.aiReady);
   const openConversation = useOpenConversation();
   const messagePerson = useMessagePerson();
+  const openAgentRoom = useOpenAgentRoom();
   const [, updatePreferences] = usePreferences();
 
   const [query, setQuery] = useState("");
@@ -132,7 +138,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       }));
 
     const recentChats = Object.values(conversations)
-      .map((conversation) => ({ conversation, title: conversationTitle(conversation, members, me.id) }))
+      .map((conversation) => ({ conversation, title: conversationTitle(conversation, members, me.id, agents) }))
       .sort(
         (a, b) =>
           (Date.parse(b.conversation.lastMessageAt ?? b.conversation.createdAt) || 0) -
@@ -150,9 +156,32 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         run: go(() => void openConversation(conversation.id)),
       }));
 
+    const agentItems: PaletteItem[] = (
+      q && aiReady
+        ? rankItems(
+            Object.values(agents).filter((agent) => !agent.archivedAt),
+            q,
+            (agent) => [
+              [agent.name, 1],
+              [agent.handle, 0.9],
+              [agent.tagline, 0.4],
+            ],
+            4,
+          )
+        : []
+    ).map((agent) => ({
+      key: `agent-${agent.id}`,
+      section: "Agents",
+      label: agent.name,
+      hint: `@${agent.handle}${agent.tagline ? ` · ${agent.tagline}` : ""}`,
+      leading: <AgentAvatar agent={agent} size="sm" />,
+      run: go(() => void openAgentRoom(agent.id)),
+    }));
+
     const messages: PaletteItem[] = search.items.map((result) => {
       const conversation = conversations[result.conversationId];
       const sender = result.senderId ? members[result.senderId] : null;
+      const author = result.agentId ? agents[result.agentId] : null;
       return {
         key: `message-${result.id}`,
         section: "Messages",
@@ -163,12 +192,12 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         ),
         hint: (
           <>
-            {nameOf(sender)}
-            {conversation ? ` in ${conversationTitle(conversation, members, me.id)}` : ""} ·{" "}
+            {result.agentId ? (author?.name ?? "Removed agent") : nameOf(sender)}
+            {conversation ? ` in ${conversationTitle(conversation, members, me.id, agents)}` : ""} ·{" "}
             <LocalTime iso={result.createdAt} format="list" />
           </>
         ),
-        leading: <Avatar person={sender} size="sm" />,
+        leading: result.agentId ? <AgentAvatar agent={author} size="sm" /> : <Avatar person={sender} size="sm" />,
         run: go(() => void openConversation(result.conversationId, result.id)),
       };
     });
@@ -195,6 +224,24 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         leading: <IconUsers size={17} />,
         run: go(() => router.push(routes.contacts(workspace.slug))),
       },
+      ...(aiReady
+        ? [
+            {
+              key: "action-new-agent",
+              section: "Actions",
+              label: "Create an agent",
+              leading: <IconSpark size={17} />,
+              run: go(() => router.push(routes.newAgent(workspace.slug))),
+            },
+            {
+              key: "action-credits",
+              section: "Actions",
+              label: "AI credits and usage",
+              leading: <IconSpark size={17} />,
+              run: go(() => router.push(routes.settings(workspace.slug, "ai"))),
+            },
+          ]
+        : []),
       {
         key: "action-settings",
         section: "Actions",
@@ -211,8 +258,8 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       },
     ].filter((item) => (q ? String(item.label).toLowerCase().includes(q) : true));
 
-    return [...chats, ...people, ...messages, ...actions];
-  }, [members, conversations, me.id, online, q, query, search.items, workspace.slug, onClose, openConversation, messagePerson, openDialog, router, updatePreferences]);
+    return [...chats, ...agentItems, ...people, ...messages, ...actions];
+  }, [members, conversations, agents, aiReady, me.id, online, q, query, search.items, workspace.slug, onClose, openConversation, messagePerson, openAgentRoom, openDialog, router, updatePreferences]);
 
   const activeIndex = Math.min(highlight, Math.max(items.length - 1, 0));
 

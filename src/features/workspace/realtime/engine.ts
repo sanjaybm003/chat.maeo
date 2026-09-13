@@ -9,7 +9,9 @@ import type { Message, PresenceStatus } from "@/types/domain";
 
 import type { ConnectionState, PresenceEntry } from "../store/types";
 import {
+  agentRefSchema,
   conversationRefSchema,
+  creditsEventSchema,
   readEventSchema,
   reactionEventSchema,
   userRefSchema,
@@ -33,6 +35,9 @@ export interface RealtimeEngineHandlers {
   /** Debounced. */
   onWorkspaceUpdated: () => void;
   onPresence: (entries: PresenceEntry[]) => void;
+  onCreditsChanged: (balance: number) => void;
+  /** Debounced per agent. */
+  onAgentChanged: (agentId: string) => void;
 }
 
 const log = logger.child({ module: "realtime-engine" });
@@ -41,7 +46,7 @@ const log = logger.child({ module: "realtime-engine" });
  * Owns the WebSocket channels for one workspace session, independent of React.
  *
  *   user:<id>        personal feed, fanned out by Postgres triggers
- *   workspace:<id>   presence (active / away) and membership hints
+ *   workspace:<id>   presence (active / away), membership, agent and credit hints
  *
  * It validates every payload, coalesces bursts of refresh hints, isolates
  * handler failures, and reports connection state including reconnects so the
@@ -56,6 +61,7 @@ export class RealtimeEngine {
   private readonly conversationRefresh: KeyedDebouncer<string>;
   private readonly memberRefresh: KeyedDebouncer<string>;
   private readonly workspaceRefresh: KeyedDebouncer<"workspace">;
+  private readonly agentRefresh: KeyedDebouncer<string>;
 
   constructor(
     private readonly supabase: BrowserSupabase,
@@ -65,6 +71,7 @@ export class RealtimeEngine {
     this.conversationRefresh = new KeyedDebouncer(200, (conversationId) => handlers.onConversationChanged(conversationId));
     this.memberRefresh = new KeyedDebouncer(400, (userId) => handlers.onMemberChanged(userId));
     this.workspaceRefresh = new KeyedDebouncer(400, () => handlers.onWorkspaceUpdated());
+    this.agentRefresh = new KeyedDebouncer(300, (agentId) => handlers.onAgentChanged(agentId));
   }
 
   async start() {
@@ -117,6 +124,12 @@ export class RealtimeEngine {
         this.parse(userRefSchema, payload, (memberId) => this.memberRefresh.schedule(memberId)),
       )
       .on("broadcast", { event: "workspace.updated" }, () => this.workspaceRefresh.schedule("workspace"))
+      .on("broadcast", { event: "credits.changed" }, ({ payload }) =>
+        this.parse(creditsEventSchema, payload, (balance) => this.handlers.onCreditsChanged(balance)),
+      )
+      .on("broadcast", { event: "agent.changed" }, ({ payload }) =>
+        this.parse(agentRefSchema, payload, (agentId) => this.agentRefresh.schedule(agentId)),
+      )
       .subscribe((status) => {
         if (status === "SUBSCRIBED" && !this.disposed) void this.track();
       });
@@ -134,6 +147,7 @@ export class RealtimeEngine {
     this.conversationRefresh.cancelAll();
     this.memberRefresh.cancelAll();
     this.workspaceRefresh.cancelAll();
+    this.agentRefresh.cancelAll();
     const channels = [this.feed, this.room].filter((channel): channel is RealtimeChannel => channel !== null);
     this.feed = null;
     this.room = null;

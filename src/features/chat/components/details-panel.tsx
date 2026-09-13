@@ -12,6 +12,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { IconClose, IconCopy, IconUserPlus } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { AgentDetails } from "@/features/ai/components/agent-details";
 import { leaveConversation, renameConversation, setConversationMuted } from "@/features/workspace/api/conversations";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { useMessagePerson } from "@/features/workspace/hooks/use-open-conversation";
@@ -40,7 +41,13 @@ export function DetailsPanel({ conversation, onClose }: { conversation: Conversa
         </IconButton>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {conversation.kind === "direct" ? <DirectDetails conversation={conversation} /> : <GroupDetails conversation={conversation} />}
+        {conversation.agentId ? (
+          <AgentDetails conversation={conversation} />
+        ) : conversation.kind === "direct" ? (
+          <DirectDetails conversation={conversation} />
+        ) : (
+          <GroupDetails conversation={conversation} />
+        )}
         <MuteRow conversation={conversation} />
       </div>
     </aside>

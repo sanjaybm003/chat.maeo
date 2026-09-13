@@ -1,19 +1,29 @@
 import { toPersonColor } from "@/lib/colors";
 import type { Json, RpcReturn, Tables } from "@/types/database";
-import type {
-  Attachment,
-  Conversation,
-  Member,
-  Message,
-  MessageKind,
-  MessagePreview,
-  PendingInvitation,
-  Profile,
-  Reaction,
-  ReplyPreview,
-  SystemMeta,
-  Workspace,
-  WorkspaceSummary,
+import {
+  AGENT_GLYPHS,
+  AGENT_TOOL_IDS,
+  type Agent,
+  type AgentGlyph,
+  type AgentRun,
+  type AgentRunStatus,
+  type AgentRunStep,
+  type AgentToolId,
+  type Attachment,
+  type Conversation,
+  type CreditAccount,
+  type Member,
+  type Message,
+  type MessageKind,
+  type MessagePreview,
+  type PendingInvitation,
+  type Profile,
+  type Reaction,
+  type ReplyPreview,
+  type SystemMeta,
+  type UsageSummary,
+  type Workspace,
+  type WorkspaceSummary,
 } from "@/types/domain";
 
 /**
@@ -32,6 +42,10 @@ function str(value: unknown): string | null {
 }
 
 function num(value: unknown): number {
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
@@ -110,6 +124,41 @@ function mapMeta(value: unknown): SystemMeta {
   };
 }
 
+const RUN_STATUSES: ReadonlySet<string> = new Set<AgentRunStatus>(["thinking", "working", "done", "failed", "cancelled"]);
+const STEP_KINDS: ReadonlySet<string> = new Set<AgentRunStep["kind"]>(["read", "tool", "web", "note"]);
+const MAX_STEPS = 20;
+
+export function mapAgentSteps(value: unknown): AgentRunStep[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((item) => {
+      if (!isObject(item) || !str(item.label)) return [];
+      const kind = str(item.kind);
+      return [
+        {
+          kind: kind && STEP_KINDS.has(kind) ? (kind as AgentRunStep["kind"]) : "note",
+          label: (item.label as string).slice(0, 140),
+        },
+      ];
+    })
+    .slice(-MAX_STEPS);
+}
+
+/** An agent reply's meta, or null for everything else. */
+export function mapAgentRun(meta: unknown): AgentRun | null {
+  if (!isObject(meta) || !str(meta.run)) return null;
+  const status = str(meta.status);
+  return {
+    runId: meta.run as string,
+    status: status && RUN_STATUSES.has(status) ? (status as AgentRunStatus) : "thinking",
+    model: str(meta.model),
+    requestedBy: str(meta.by),
+    steps: mapAgentSteps(meta.steps),
+    credits: meta.credits === undefined || meta.credits === null ? null : num(meta.credits),
+    error: str(meta.error),
+  };
+}
+
 function mapAttachments(value: unknown): Attachment[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -142,6 +191,7 @@ function mapReplyPreview(value: unknown): ReplyPreview | null {
   return {
     id: value.id as string,
     senderId: str(value.sender_id),
+    agentId: str(value.agent_id),
     body: str(value.body) ?? "",
     attachmentCount: num(value.attachment_count),
     deletedAt: str(value.deleted_at),
@@ -150,9 +200,12 @@ function mapReplyPreview(value: unknown): ReplyPreview | null {
 
 function mapPreview(value: unknown): MessagePreview | null {
   if (!isObject(value) || !str(value.id)) return null;
+  const agentId = str(value.agent_id);
   return {
     id: value.id as string,
     senderId: str(value.sender_id),
+    agentId,
+    agentStatus: agentId ? (mapAgentRun(value.meta)?.status ?? null) : null,
     kind: (str(value.kind) ?? "text") as MessageKind,
     body: str(value.body) ?? "",
     meta: mapMeta(value.meta),
@@ -186,6 +239,7 @@ export function mapConversation(row: RpcReturn<"list_conversations">[number]): C
         : [],
     ),
     lastMessage: mapPreview(row.last_message),
+    agentId: row.agent_id ?? null,
   };
 }
 
@@ -193,14 +247,17 @@ export function mapConversation(row: RpcReturn<"list_conversations">[number]): C
 export function mapMessage(value: unknown): Message | null {
   if (!isObject(value) || !str(value.id) || !str(value.conversation_id)) return null;
   const createdAt = str(value.created_at) ?? new Date().toISOString();
+  const agentId = str(value.agent_id);
   return {
     id: value.id as string,
     conversationId: value.conversation_id as string,
     senderId: str(value.sender_id),
+    agentId,
     kind: (str(value.kind) ?? "text") as MessageKind,
     body: str(value.body) ?? "",
     attachments: mapAttachments(value.attachments),
     meta: mapMeta(value.meta),
+    run: agentId ? mapAgentRun(value.meta) : null,
     replyToId: str(value.reply_to_id),
     replyTo: mapReplyPreview(value.reply_to),
     editedAt: str(value.edited_at),
@@ -217,11 +274,71 @@ export function previewOf(message: Message): MessagePreview {
   return {
     id: message.id,
     senderId: message.senderId,
+    agentId: message.agentId,
+    agentStatus: message.run?.status ?? null,
     kind: message.kind,
     body: message.body.slice(0, 180),
     meta: message.meta,
     attachmentCount: message.attachments.length,
     deletedAt: message.deletedAt,
     createdAt: message.createdAt,
+  };
+}
+
+// AI ───────────────────────────────────────────────────────────────────────────
+
+const isToolId = (value: string): value is AgentToolId => (AGENT_TOOL_IDS as readonly string[]).includes(value);
+const isGlyph = (value: string): value is AgentGlyph => (AGENT_GLYPHS as readonly string[]).includes(value);
+
+export function mapAgent(row: Tables<"ai_agents">): Agent {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    createdBy: row.created_by,
+    name: row.name,
+    handle: row.handle,
+    tagline: row.tagline ?? "",
+    instructions: row.instructions,
+    model: row.model,
+    tools: (row.tools ?? []).filter(isToolId),
+    starters: row.starters ?? [],
+    color: toPersonColor(row.color),
+    glyph: isGlyph(row.glyph) ? row.glyph : "orbit",
+    visibility: row.visibility === "private" ? "private" : "workspace",
+    archivedAt: row.archived_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapCreditAccount(value: unknown): CreditAccount | null {
+  if (!isObject(value)) return null;
+  return {
+    balance: num(value.balance),
+    reserved: num(value.reserved),
+    lifetimeGranted: num(value.lifetime_granted),
+    lifetimeUsed: num(value.lifetime_used),
+  };
+}
+
+function buckets<T>(value: unknown, extra: (item: JsonObject) => T | null) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isObject(item)) return [];
+    const fields = extra(item);
+    return fields === null ? [] : [{ ...fields, credits: num(item.credits), runs: num(item.runs) }];
+  });
+}
+
+export function mapUsageSummary(value: unknown): UsageSummary {
+  const data = isObject(value) ? value : {};
+  return {
+    timeZone: str(data.time_zone) ?? "UTC",
+    since: str(data.since) ?? new Date().toISOString(),
+    account: mapCreditAccount(data.account),
+    days: buckets(data.days, (item) => (str(item.day) ? { day: item.day as string } : null)),
+    agents: buckets(data.agents, (item) => ({ agentId: str(item.agent_id) })),
+    models: buckets(data.models, (item) => (str(item.model) ? { model: item.model as string } : null)),
+    people: buckets(data.people, (item) => ({ userId: str(item.user_id) })),
   };
 }

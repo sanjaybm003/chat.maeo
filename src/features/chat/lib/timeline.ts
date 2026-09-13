@@ -16,6 +16,7 @@ function continues(previous: Message | undefined, message: Message | undefined) 
     previous.kind === "text" &&
     message.kind === "text" &&
     previous.senderId === message.senderId &&
+    previous.agentId === message.agentId &&
     sameDay(previous.createdAt, message.createdAt) &&
     minutesApart(previous.createdAt, message.createdAt) <= MESSAGE_GROUP_WINDOW_MINUTES
   );

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { IconButton } from "@/components/ui/icon-button";
 import { IconArrowLeft, IconBell, IconBellOff, IconInfo, IconUserPlus } from "@/components/ui/icons";
+import { findModel } from "@/features/ai/models";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { setConversationMuted } from "@/features/workspace/api/conversations";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
@@ -24,6 +25,7 @@ interface ConversationHeaderProps {
 export function ConversationHeader({ conversation, detailsOpen, onToggleDetails }: ConversationHeaderProps) {
   const store = useWorkspaceStore();
   const members = useWorkspace((state) => state.members);
+  const agents = useWorkspace((state) => state.agents);
   const meId = useWorkspace((state) => state.me.id);
   const slug = useWorkspace((state) => state.workspace.slug);
   const online = useWorkspace((state) => state.online);
@@ -32,11 +34,18 @@ export function ConversationHeader({ conversation, detailsOpen, onToggleDetails 
   const openDialog = useWorkspace((state) => state.openDialog);
   const typingIds = typing ? Object.keys(typing) : [];
 
-  const title = conversationTitle(conversation, members, meId);
+  const title = conversationTitle(conversation, members, meId, agents);
   const partner = directPartner(conversation, members, meId);
+  const agent = conversation.agentId ? agents[conversation.agentId] : undefined;
 
   let subtitle: string;
-  if (typingIds.length > 0) {
+  if (conversation.agentId) {
+    subtitle = !agent
+      ? "This agent was removed"
+      : agent.archivedAt
+        ? "Archived agent"
+        : `AI agent · ${findModel(agent.model)?.label ?? agent.model}`;
+  } else if (typingIds.length > 0) {
     subtitle = conversation.kind === "direct" ? "typing…" : `${joinNames(typingIds.map((id) => firstNameOf(members[id])), 2)} typing…`;
   } else if (conversation.kind === "direct") {
     subtitle = partner ? (online[partner.id] ? "Online" : partner.title || partner.email) : "No longer in this workspace";
@@ -93,14 +102,16 @@ export function ConversationHeader({ conversation, detailsOpen, onToggleDetails 
         <IconButton label={conversation.muted ? "Unmute" : "Mute"} onClick={() => void toggleMute()} tooltipSide="bottom">
           {conversation.muted ? <IconBellOff /> : <IconBell />}
         </IconButton>
-        <IconButton
-          label={conversation.kind === "direct" ? "Start a group" : "Add people"}
-          onClick={() => openDialog({ name: "add-people", conversationId: conversation.id })}
-          tooltipSide="bottom"
-          className="hidden sm:inline-flex"
-        >
-          <IconUserPlus />
-        </IconButton>
+        {conversation.agentId ? null : (
+          <IconButton
+            label={conversation.kind === "direct" ? "Start a group" : "Add people"}
+            onClick={() => openDialog({ name: "add-people", conversationId: conversation.id })}
+            tooltipSide="bottom"
+            className="hidden sm:inline-flex"
+          >
+            <IconUserPlus />
+          </IconButton>
+        )}
         <IconButton
           label={detailsOpen ? "Hide details" : "Details"}
           onClick={onToggleDetails}

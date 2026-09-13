@@ -7,12 +7,13 @@ import { TYPING_BROADCAST_INTERVAL_MS } from "@/lib/constants";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 import { useWorkspace, useWorkspaceStore } from "../store/workspace-provider";
-import { typingEventSchema } from "./events";
+import { agentStreamSchema, typingEventSchema } from "./events";
 
 /**
- * Ephemeral, per-conversation signals. Typing never touches the database:
- * it is broadcast peer to peer over a private channel only participants may
- * join, throttled on send and expired on receive.
+ * Ephemeral, per-conversation signals over a private channel only
+ * participants may join:
+ *   typing        peer to peer, never stored, throttled on send, expired on receive
+ *   agent.stream  snapshots of an agent reply while it is being written
  */
 export function useConversationChannel(conversationId: string) {
   const store = useWorkspaceStore();
@@ -32,6 +33,10 @@ export function useConversationChannel(conversationId: string) {
         const conversation = store.getState().conversations[conversationId];
         if (!conversation?.participants.some((participant) => participant.userId === parsed.data.userId)) return;
         store.getState().setTyping(conversationId, parsed.data.userId, parsed.data.typing);
+      })
+      .on("broadcast", { event: "agent.stream" }, ({ payload }) => {
+        const parsed = agentStreamSchema.safeParse(payload);
+        if (parsed.success) store.getState().applyAgentStream(conversationId, parsed.data.messageId, parsed.data.stream);
       });
 
     channelRef.current = channel;

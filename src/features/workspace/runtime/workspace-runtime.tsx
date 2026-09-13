@@ -3,9 +3,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
+import { AiRequestError, requestAgentReplies } from "@/features/ai/api";
+import { agentsToWake } from "@/features/ai/wake";
 import { Outbox, outboxEntryToMessage } from "@/features/chat/outbox/outbox";
 import { createOutboxStorage } from "@/features/chat/outbox/storage";
 import { usePushSync } from "@/features/notifications/use-push-sync";
+import type { Message } from "@/types/domain";
 
 import { insertMessage } from "../api/messages";
 import { useRealtimeSync } from "../realtime/use-realtime-sync";
@@ -19,6 +22,19 @@ export interface WorkspaceRuntime {
 }
 
 const RuntimeContext = createContext<WorkspaceRuntime | null>(null);
+
+/**
+ * Once a message is stored, asks the server to start any agents it calls on.
+ * Runs only after the send is confirmed, so an agent never answers a message
+ * that didn't land; repeats are harmless because runs are idempotent.
+ */
+function wakeAgents(store: WorkspaceStore, message: Message) {
+  const { aiReady, agents, conversations } = store.getState();
+  if (!aiReady || agentsToWake(message.body, conversations[message.conversationId], agents).length === 0) return;
+  requestAgentReplies(message.id).catch((error: unknown) => {
+    toast.error(error instanceof AiRequestError ? error.message : "The agent couldn't start. Try again.");
+  });
+}
 
 function createRuntime(store: WorkspaceStore): WorkspaceRuntime {
   const { me, workspace } = store.getState();
@@ -37,8 +53,10 @@ function createRuntime(store: WorkspaceStore): WorkspaceRuntime {
         }),
     },
     listener: {
-      onSent: (entry, message) =>
-        store.getState().receiveMessage({ ...message, replyTo: message.replyTo ?? entry.replyTo }, { keepReactions: true }),
+      onSent: (entry, message) => {
+        store.getState().receiveMessage({ ...message, replyTo: message.replyTo ?? entry.replyTo }, { keepReactions: true });
+        wakeAgents(store, message);
+      },
       onFailed: (entry, error) => {
         store.getState().patchMessage(entry.conversationId, entry.id, { delivery: "failed" });
         toast.error(error.kind === "network" ? "Message not sent. Check your connection and retry." : error.message);

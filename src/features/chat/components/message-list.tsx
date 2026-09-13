@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { IconArrowDown } from "@/components/ui/icons";
 import { LocalTime } from "@/components/ui/local-time";
 import { Spinner } from "@/components/ui/spinner";
+import { AgentIntro } from "@/features/ai/components/agent-intro";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
 import { cn, nameOf } from "@/lib/utils";
@@ -35,6 +36,7 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
   const { thread, loadOlder, retry } = useThread(conversationId);
   const me = useWorkspace((state) => state.me);
   const members = useWorkspace((state) => state.members);
+  const agents = useWorkspace((state) => state.agents);
   const actions = useMessageActions(conversationId);
   const markRead = useMarkRead(conversationId);
 
@@ -183,7 +185,7 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
         onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
         role="log"
-        aria-label={`Messages with ${conversationTitle(conversation, members, me.id)}`}
+        aria-label={`Messages with ${conversationTitle(conversation, members, me.id, agents)}`}
         aria-live="polite"
         aria-relevant="additions"
       >
@@ -198,6 +200,8 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
                 </Button>
               )}
             </div>
+          ) : conversation.agentId ? (
+            <AgentIntro conversation={conversation} />
           ) : (
             <ConversationIntro conversation={conversation} />
           )}
@@ -240,6 +244,7 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
                 key={row.key}
                 message={message}
                 sender={message.senderId ? (members[message.senderId] ?? null) : null}
+                agent={message.agentId ? (agents[message.agentId] ?? null) : null}
                 mine={message.senderId === me.id}
                 myColor={me.color}
                 startsGroup={row.startsGroup}

@@ -1,6 +1,7 @@
 "use client";
 
 import { Avatar, GroupAvatar } from "@/components/ui/avatar";
+import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { conversationPeople, directPartner } from "@/features/chat/lib/conversation-meta";
 import type { Conversation } from "@/types/domain";
 
@@ -16,6 +17,11 @@ export function ConversationAvatar({
   const members = useWorkspace((state) => state.members);
   const meId = useWorkspace((state) => state.me.id);
   const online = useWorkspace((state) => state.online);
+  const agent = useWorkspace((state) => (conversation.agentId ? state.agents[conversation.agentId] : undefined));
+
+  if (conversation.agentId) {
+    return <AgentAvatar agent={agent} size={size} />;
+  }
 
   if (conversation.kind === "direct") {
     const partner = directPartner(conversation, members, meId);
