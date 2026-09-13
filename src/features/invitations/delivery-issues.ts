@@ -1,5 +1,5 @@
 /** Why an invitation email didn't go out. Shared by server delivery and the report UI. */
-export type DeliveryIssue = "not_configured" | "rate_limited" | "rejected" | "failed";
+export type DeliveryIssue = "not_configured" | "invalid_sender" | "smtp_error" | "rejected" | "rate_limited" | "failed";
 
 /**
  * Maps provider errors (Supabase Auth, Resend) onto something a person can act on.
@@ -16,10 +16,13 @@ export function classifyDeliveryFailure(detail: string, status?: number): Delive
   if (status === 401 || /missing environment variable|api key is invalid|invalid api key|not configured/i.test(detail)) {
     return "not_configured";
   }
+  // Supabase Auth hands mail to the project's SMTP server; any failure there surfaces like this.
+  if (/error sending [a-z ]*email|smtp|unexpected_failure/i.test(detail)) return "smtp_error";
+  if (/`?from`? field|invalid from|sender/i.test(detail)) return "invalid_sender";
   return "failed";
 }
 
-const PRIORITY: DeliveryIssue[] = ["not_configured", "rejected", "rate_limited", "failed"];
+const PRIORITY: DeliveryIssue[] = ["not_configured", "invalid_sender", "smtp_error", "rejected", "rate_limited", "failed"];
 
 /** When invites fail for different reasons, surface the one that needs fixing first. */
 export function mostActionableIssue(issues: DeliveryIssue[]): DeliveryIssue | null {
@@ -28,6 +31,10 @@ export function mostActionableIssue(issues: DeliveryIssue[]): DeliveryIssue | nu
 
 export const DELIVERY_ISSUE_REASON: Record<DeliveryIssue, string> = {
   not_configured: "Email sending isn't set up on this server yet.",
+  invalid_sender:
+    "The sender address isn't valid. Set EMAIL_FROM to a name and an address on your verified domain, like maeosan <team@yourdomain.com>.",
+  smtp_error:
+    "Supabase couldn't send through your SMTP settings. In Supabase → Authentication → Emails → SMTP, check the host, port, username and password. Gmail needs an App Password, and the sender email must be that Gmail address.",
   rate_limited: "The email service is limiting how many emails we can send right now.",
   rejected:
     "The email service refused these addresses. Supabase's built-in email only reaches your own team until custom SMTP or a verified sending domain is set up.",

@@ -11,10 +11,21 @@ describe("classifyDeliveryFailure", () => {
     expect(classifyDeliveryFailure("Missing environment variable SUPABASE_SERVICE_ROLE_KEY.")).toBe("not_configured");
   });
 
+  it("recognises SMTP failures behind Supabase Auth", () => {
+    expect(classifyDeliveryFailure("unexpected_failure Error sending invite email", 500)).toBe("smtp_error");
+    expect(classifyDeliveryFailure("Error sending magic link email", 500)).toBe("smtp_error");
+  });
+
   it("recognises Resend errors", () => {
     expect(classifyDeliveryFailure("You can only send testing emails to your own email address.", 403)).toBe("rejected");
     expect(classifyDeliveryFailure("The example.com domain is not verified.", 422)).toBe("rejected");
     expect(classifyDeliveryFailure("API key is invalid", 401)).toBe("not_configured");
+    expect(
+      classifyDeliveryFailure(
+        "Invalid `from` field. The email address needs to follow the `email@example.com` or `Name <email@example.com>` format.",
+        422,
+      ),
+    ).toBe("invalid_sender");
   });
 
   it("falls back to a generic failure", () => {
@@ -25,6 +36,7 @@ describe("classifyDeliveryFailure", () => {
 describe("mostActionableIssue", () => {
   it("prefers configuration problems over transient ones", () => {
     expect(mostActionableIssue(["failed", "rate_limited", "not_configured"])).toBe("not_configured");
+    expect(mostActionableIssue(["failed", "rate_limited", "smtp_error"])).toBe("smtp_error");
     expect(mostActionableIssue(["failed", "rate_limited"])).toBe("rate_limited");
     expect(mostActionableIssue([])).toBeNull();
   });

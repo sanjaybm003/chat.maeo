@@ -46,8 +46,15 @@ export async function inviteToWorkspace(input: z.input<typeof inviteSchema>): Pr
 
   const workspaceName = workspace?.name ?? "your team";
   const inviterName = inviter?.full_name || inviter?.display_name || inviter?.email || "A teammate";
-  const report: InviteReport = { sent: [], alreadyMembers: [], invalid: [], undelivered: [], emailIssue: null };
-  const issues: DeliveryIssue[] = [];
+  const report: InviteReport = {
+    sent: [],
+    alreadyMembers: [],
+    invalid: [],
+    undelivered: [],
+    emailIssue: null,
+    emailIssueDetail: null,
+  };
+  const failures: Array<{ issue: DeliveryIssue; detail: string }> = [];
 
   await Promise.all(
     (rows ?? []).map(async (row) => {
@@ -66,7 +73,7 @@ export async function inviteToWorkspace(input: z.input<typeof inviteSchema>): Pr
         return;
       }
 
-      issues.push(delivery.issue);
+      failures.push({ issue: delivery.issue, detail: delivery.detail });
       report.undelivered.push({ email: row.invited_email, token: row.invite_token });
       // A missing email setup is a known state, not an incident.
       const log = delivery.issue === "not_configured" ? logger.info : logger.warn;
@@ -74,7 +81,9 @@ export async function inviteToWorkspace(input: z.input<typeof inviteSchema>): Pr
     }),
   );
 
-  report.emailIssue = mostActionableIssue(issues);
+  report.emailIssue = mostActionableIssue(failures.map((failure) => failure.issue));
+  const detail = failures.find((failure) => failure.issue === report.emailIssue)?.detail;
+  report.emailIssueDetail = detail ? detail.replace(/\s+/g, " ").trim().slice(0, 240) : null;
   return ok(report);
 }
 

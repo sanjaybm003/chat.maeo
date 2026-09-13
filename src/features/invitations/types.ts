@@ -13,4 +13,6 @@ export interface InviteReport {
   undelivered: UndeliveredInvite[];
   /** Why emails didn't go out, when some didn't. */
   emailIssue: DeliveryIssue | null;
+  /** The email provider's own message behind `emailIssue`, for troubleshooting. */
+  emailIssueDetail: string | null;
 }

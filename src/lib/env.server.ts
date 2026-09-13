@@ -1,5 +1,7 @@
 import "server-only";
 
+import { normalizeEmailFrom } from "@/features/invitations/email-from";
+
 // `||`, not `??`: an empty variable in .env.local means "not set".
 const serviceRoleKey = () => process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
 
@@ -20,6 +22,6 @@ export const serverEnv = {
     return process.env.RESEND_API_KEY || null;
   },
   get emailFrom() {
-    return process.env.EMAIL_FROM || "maeosan <onboarding@resend.dev>";
+    return normalizeEmailFrom(process.env.EMAIL_FROM) ?? "maeosan <onboarding@resend.dev>";
   },
 };

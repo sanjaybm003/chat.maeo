@@ -44,6 +44,9 @@ export function InviteReportView({ report }: { report: InviteReport }) {
       {report.undelivered.length > 0 ? (
         <ReportRow tone="saffron" title="We couldn't email these. Share the link yourself.">
           <p>{DELIVERY_ISSUE_REASON[report.emailIssue ?? "failed"]}</p>
+          {report.emailIssueDetail ? (
+            <p className="mt-1 break-words font-mono text-[11.5px] text-ink-4">Details: {report.emailIssueDetail}</p>
+          ) : null}
           <ul className="mt-2 flex flex-col gap-1.5">
             {report.undelivered.map((item) => (
               <li key={item.email} className="flex items-center justify-between gap-3">
