@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f4f0e8;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f0e8;padding:40px 16px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #e5dfd2;border-radius:24px;overflow:hidden;">
+          <tr><td style="height:12px;background:#3355f0;"></td></tr>
+          <tr><td style="padding:36px 36px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#191713;">
+            <p style="margin:0 0 24px;font-size:18px;font-weight:700;letter-spacing:-0.5px;">maeosan</p>
+            <h1 style="margin:0;font-size:28px;line-height:1.15;font-weight:700;letter-spacing:-0.8px;">Confirm your email</h1>
+            <p style="margin:16px 0 0;font-size:16px;line-height:1.6;color:#4c473d;">One tap and you're in. Then we'll help you set up your profile and workspace.</p>
+          </td></tr>
+          <tr><td style="padding:28px 36px 36px;">
+            <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email&next=/onboarding" style="display:inline-block;background:#191713;color:#f4f0e8;text-decoration:none;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;padding:14px 26px;border-radius:999px;">Confirm email</a>
+          </td></tr>
+        </table>
+        <p style="margin:20px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#847d6f;">Didn't sign up? Ignore this email and nothing happens.</p>
+      </td></tr>
+    </table>
+  </body>
+</html>
