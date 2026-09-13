@@ -13,6 +13,7 @@ import { LocalTime } from "@/components/ui/local-time";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Segmented } from "@/components/ui/segmented";
 import { inviteToWorkspace, revokeInvitation } from "@/features/invitations/actions";
+import { DELIVERY_ISSUE_REASON } from "@/features/invitations/delivery-issues";
 import {
   fetchPendingInvitations,
   removeMember,
@@ -321,7 +322,9 @@ function InvitationList({ invitations, onChanged }: { invitations: WorkspaceInvi
     const result = await inviteToWorkspace({ workspaceId, emails: [invite.email], role: invite.role === "admin" ? "admin" : "member" });
     setBusy(null);
     if (!result.ok) return void toast.error(result.error);
-    if (result.data.undelivered.length > 0) toast.error("We couldn't email them. Copy the link instead.");
+    if (result.data.undelivered.length > 0) {
+      toast.error(`${DELIVERY_ISSUE_REASON[result.data.emailIssue ?? "failed"]} Copy the link instead.`);
+    }
     else toast.success(`Sent again to ${invite.email}.`);
     onChanged();
   }

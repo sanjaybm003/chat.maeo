@@ -6,10 +6,12 @@ import { z } from "zod";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { LAST_WORKSPACE_COOKIE } from "@/lib/constants";
 import { getErrorMessage } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import { getAppOrigin } from "@/lib/request";
 import { routes } from "@/lib/routes";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+import { mostActionableIssue, type DeliveryIssue } from "./delivery-issues";
 import { deliverInvitation } from "./server/deliver";
 import type { InviteReport } from "./types";
 
@@ -44,7 +46,8 @@ export async function inviteToWorkspace(input: z.input<typeof inviteSchema>): Pr
 
   const workspaceName = workspace?.name ?? "your team";
   const inviterName = inviter?.full_name || inviter?.display_name || inviter?.email || "A teammate";
-  const report: InviteReport = { sent: [], alreadyMembers: [], invalid: [], undelivered: [] };
+  const report: InviteReport = { sent: [], alreadyMembers: [], invalid: [], undelivered: [], emailIssue: null };
+  const issues: DeliveryIssue[] = [];
 
   await Promise.all(
     (rows ?? []).map(async (row) => {
@@ -60,13 +63,18 @@ export async function inviteToWorkspace(input: z.input<typeof inviteSchema>): Pr
       });
       if (delivery.delivered) {
         report.sent.push(row.invited_email);
-      } else {
-        console.error("[invitations] delivery failed", { email: row.invited_email, reason: delivery.reason });
-        report.undelivered.push({ email: row.invited_email, link: `${origin}${routes.invite(row.invite_token)}` });
+        return;
       }
+
+      issues.push(delivery.issue);
+      report.undelivered.push({ email: row.invited_email, token: row.invite_token });
+      // A missing email setup is a known state, not an incident.
+      const log = delivery.issue === "not_configured" ? logger.info : logger.warn;
+      log("invitation email not delivered", { workspaceId: parsed.data.workspaceId, issue: delivery.issue, detail: delivery.detail });
     }),
   );
 
+  report.emailIssue = mostActionableIssue(issues);
   return ok(report);
 }
 

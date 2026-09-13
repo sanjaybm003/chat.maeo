@@ -135,6 +135,8 @@ These links verify with a token hash, so they work even when opened in a differe
 
 **Production email.** Supabase's built-in mailer is heavily rate-limited. Configure custom SMTP in **Authentication → Emails → SMTP settings**. You can also set `RESEND_API_KEY` to send invitations with maeosan's own template.
 
+**Invitations.** Invite emails need a sender. Either set `RESEND_API_KEY`, with `EMAIL_FROM` on a domain you verified in Resend, or set `SUPABASE_SERVICE_ROLE_KEY` to send through Supabase Auth. Supabase's built-in mailer only delivers to members of your Supabase organization, so add custom SMTP (Authentication → Emails → SMTP) before inviting anyone else. Without email, the app gives you a link to copy. A `localhost` link only opens on your own computer; to invite someone on another device, deploy maeosan and set `NEXT_PUBLIC_SITE_URL` and the Supabase Site URL to the public address.
+
 **Google (optional).** Enable the Google provider, add the Supabase callback URL to your Google OAuth client, then set `NEXT_PUBLIC_AUTH_GOOGLE_ENABLED=true`.
 
 ### 5. Lock down Realtime
@@ -171,9 +173,13 @@ Open http://localhost:3000, create an account, and follow setup. To see realtime
 
 Any Node host that runs Next.js works; Vercel is the simplest.
 
-1. Set the variables from `.env.example`, with `NEXT_PUBLIC_SITE_URL` set to the production origin.
-2. Add the production origin to Supabase **Site URL** and **Redirect URLs**.
-3. Deploy.
+1. In **Vercel → Project → Settings → Environment Variables**, add the variables from `.env.example`. Vercel never reads your local `.env.local`.
+2. `NEXT_PUBLIC_SITE_URL` is optional on Vercel. When it's unset, the production domain is used automatically. If you set it, use the exact `https://` address.
+3. `NEXT_PUBLIC_…` values are baked in at build time, so **redeploy** after changing any of them.
+4. In Supabase **Authentication → URL Configuration**, set **Site URL** to the production address and add `https://your-domain/**` to **Redirect URLs**.
+5. Open `/api/health`. `siteUrl` should be your real address and `database.ok` should be `true`.
+
+**Email without a domain of your own.** Resend needs a domain you own. Without one, use Gmail in Supabase: **Authentication → Emails → SMTP Settings**, with host `smtp.gmail.com`, port `465`, your Gmail address as the username and a Google **App Password** as the password. Then set `SUPABASE_SERVICE_ROLE_KEY` in Vercel and leave `RESEND_API_KEY` empty. Invitations, confirmations and password resets all go out through Gmail.
 
 ## Security notes
 

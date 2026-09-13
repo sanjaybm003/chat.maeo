@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isLocalHostname } from "@/lib/origin";
+
 const url = z.url({ protocol: /^https?$/ });
 
 const schema = z.object({
@@ -14,6 +16,7 @@ const schema = z.object({
   VAPID_SUBJECT: z.string().regex(/^(mailto:|https:\/\/)/, "Use mailto:you@domain or an https URL").optional(),
   PUSH_DISPATCH_SECRET: z.string().min(32, "Use at least 32 random characters").optional(),
   RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional(),
 });
 
@@ -24,8 +27,8 @@ export interface EnvReport {
 
 /**
  * Checks configuration once at server start. Missing essentials are errors;
- * missing optional capabilities (push, service role) are warnings that say
- * exactly which feature is off.
+ * missing or suspicious optional settings are warnings that say exactly which
+ * feature is affected and how to fix it.
  */
 export function validateEnv(env: Record<string, string | undefined> = process.env): EnvReport {
   const errors: string[] = [];
@@ -39,14 +42,36 @@ export function validateEnv(env: Record<string, string | undefined> = process.en
   }
 
   const value = parsed.data;
+  const onVercel = Boolean(env.VERCEL_ENV);
+  const production = env.NODE_ENV === "production";
+
   if (!value.NEXT_PUBLIC_SUPABASE_ANON_KEY && !value.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
     errors.push("NEXT_PUBLIC_SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) is required.");
   }
   if (!value.SUPABASE_SERVICE_ROLE_KEY && !value.SUPABASE_SECRET_KEY) {
-    warnings.push("SUPABASE_SERVICE_ROLE_KEY is not set: invitation emails, web push and account deletion are disabled.");
+    warnings.push("SUPABASE_SERVICE_ROLE_KEY is not set: invitation emails through Supabase, web push and account deletion are disabled.");
   }
-  if (!value.NEXT_PUBLIC_SITE_URL) {
+
+  if (value.NEXT_PUBLIC_SITE_URL) {
+    const site = new URL(value.NEXT_PUBLIC_SITE_URL);
+    const productionHost = env.VERCEL_PROJECT_PRODUCTION_URL;
+    if (env.VERCEL_ENV === "production" && productionHost && site.host !== productionHost) {
+      warnings.push(
+        `NEXT_PUBLIC_SITE_URL points to ${site.host}, but this project's production domain is ${productionHost}. ` +
+          "Sign-in and invitation links will open the wrong site. Correct it in Vercel and redeploy, or remove it to use the production domain automatically.",
+      );
+    }
+    if (production && site.protocol === "http:" && !isLocalHostname(site.hostname)) {
+      warnings.push(`NEXT_PUBLIC_SITE_URL uses http://. Use https://${site.host} so links aren't downgraded or blocked.`);
+    }
+  } else if (!onVercel) {
     warnings.push("NEXT_PUBLIC_SITE_URL is not set: auth links will use the request origin.");
+  }
+
+  if (value.RESEND_API_KEY && (!value.EMAIL_FROM || /@resend\.dev\b/i.test(value.EMAIL_FROM))) {
+    warnings.push(
+      "RESEND_API_KEY is set but EMAIL_FROM isn't on a domain you verified in Resend, so Resend will only deliver to your own account email.",
+    );
   }
 
   const pushKeys = [value.NEXT_PUBLIC_VAPID_PUBLIC_KEY, value.VAPID_PRIVATE_KEY, value.PUSH_DISPATCH_SECRET];

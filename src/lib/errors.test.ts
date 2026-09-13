@@ -35,6 +35,10 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage({ message: "Pick at least one person." })).toBe("Pick at least one person.");
   });
 
+  it("explains when Supabase refuses to email an address", () => {
+    expect(getErrorMessage({ message: "Error sending confirmation email" })).toMatch(/custom SMTP/);
+  });
+
   it("hides internals behind a fallback", () => {
     expect(getErrorMessage({ message: "relation \"x\" does not exist" }, "Nope.")).toBe("Nope.");
   });

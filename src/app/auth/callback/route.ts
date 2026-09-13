@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { preferredOrigin } from "@/lib/origin";
 import { routes, safeNextPath } from "@/lib/routes";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -20,7 +21,11 @@ const isExpiredCode = (code: string | null | undefined) => code === "otp_expired
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const origin = process.env.NEXT_PUBLIC_SITE_URL ? env.siteUrl : request.nextUrl.origin;
+  const origin = preferredOrigin({
+    configured: env.configuredSiteUrl ?? undefined,
+    requestOrigin: request.nextUrl.origin,
+    production: process.env.NODE_ENV === "production",
+  });
   const next = safeNextPath(searchParams.get("next"));
   const code = searchParams.get("code");
   const tokenHash = searchParams.get("token_hash");

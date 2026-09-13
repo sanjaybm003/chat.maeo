@@ -14,7 +14,24 @@ function required(name: string, value: string | undefined): string {
 }
 
 function stripTrailingSlash(url: string) {
-  return url.endsWith("/") ? url.slice(0, -1) : url;
+  return url.replace(/\/+$/, "");
+}
+
+/**
+ * The public address of this deployment. An explicit NEXT_PUBLIC_SITE_URL
+ * wins; on Vercel, when it's unset, the project's production domain (or a
+ * preview deployment's own URL) is used, so nothing has to be kept in sync.
+ */
+function configuredSiteUrl(): string | null {
+  if (process.env.NEXT_PUBLIC_SITE_URL) return stripTrailingSlash(process.env.NEXT_PUBLIC_SITE_URL);
+
+  const vercelEnv = process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
+  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL;
+  const deploymentHost = process.env.VERCEL_URL || process.env.NEXT_PUBLIC_VERCEL_URL;
+
+  if (vercelEnv === "production" && productionHost) return `https://${productionHost}`;
+  if (deploymentHost) return `https://${deploymentHost}`;
+  return null;
 }
 
 export const env = {
@@ -24,17 +41,15 @@ export const env = {
   get supabaseAnonKey() {
     return required(
       "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     );
   },
+  /** Null when nothing says where the site lives (local development). */
+  get configuredSiteUrl() {
+    return configuredSiteUrl();
+  },
   get siteUrl() {
-    if (process.env.NEXT_PUBLIC_SITE_URL) {
-      return stripTrailingSlash(process.env.NEXT_PUBLIC_SITE_URL);
-    }
-    if (process.env.NEXT_PUBLIC_VERCEL_URL) {
-      return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`;
-    }
-    return "http://localhost:3000";
+    return configuredSiteUrl() ?? "http://localhost:3000";
   },
   get googleAuthEnabled() {
     return process.env.NEXT_PUBLIC_AUTH_GOOGLE_ENABLED === "true";

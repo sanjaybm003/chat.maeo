@@ -1,4 +1,8 @@
 const FRIENDLY_MESSAGES: Array<[RegExp, string]> = [
+  [
+    /email address .*not authorized|email_address_not_authorized|error sending (confirmation|magic link|invite|recovery|email change) email/i,
+    "We couldn't send the email. This project's email service can't reach that address yet (Supabase needs custom SMTP for that).",
+  ],
   [/invalid login credentials/i, "That email and password don't match."],
   [/email not confirmed/i, "Confirm your email first. The link is in your inbox."],
   [/user already registered|already been registered/i, "An account with this email already exists. Try signing in."],

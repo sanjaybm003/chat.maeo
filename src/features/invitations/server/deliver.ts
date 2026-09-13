@@ -4,6 +4,7 @@ import { serverEnv } from "@/lib/env.server";
 import { routes } from "@/lib/routes";
 import { createSupabaseAdminClient, createSupabaseMailerClient } from "@/lib/supabase/admin";
 
+import { classifyDeliveryFailure, type DeliveryIssue } from "../delivery-issues";
 import { renderInviteEmail } from "./invite-email";
 
 interface DeliveryInput {
@@ -14,18 +15,37 @@ interface DeliveryInput {
   origin: string;
 }
 
-export type DeliveryResult = { delivered: true } | { delivered: false; reason: string };
+export type DeliveryResult = { delivered: true } | { delivered: false; issue: DeliveryIssue; detail: string };
+
+const failure = (detail: string, status?: number): DeliveryResult => ({
+  delivered: false,
+  issue: classifyDeliveryFailure(detail, status),
+  detail,
+});
+
+const describe = (error: { code?: string; message: string }) => `${error.code ?? ""} ${error.message}`.trim();
 
 /**
- * Resend when configured (branded template, works for everyone). Otherwise
- * Supabase Auth: an invite email for new people, a sign-in link that lands on
- * the invitation for people who already have an account.
+ * Resend when configured (branded template, any recipient on a verified
+ * domain). Otherwise Supabase Auth: an invite email for new people, a sign-in
+ * link that lands on the invitation for people who already have an account.
  */
 export async function deliverInvitation(input: DeliveryInput): Promise<DeliveryResult> {
   const acceptPath = routes.invite(input.token);
 
   if (serverEnv.resendApiKey) {
-    return sendWithResend(input, `${input.origin}${acceptPath}`);
+    const viaResend = await sendWithResend(input, `${input.origin}${acceptPath}`);
+    // An unverified sending domain shouldn't strand invites when Supabase can send them.
+    const recoverable = !viaResend.delivered && (viaResend.issue === "rejected" || viaResend.issue === "not_configured");
+    if (!recoverable || !serverEnv.hasServiceRoleKey) return viaResend;
+  }
+
+  if (!serverEnv.hasServiceRoleKey) {
+    return {
+      delivered: false,
+      issue: "not_configured",
+      detail: "Set RESEND_API_KEY or SUPABASE_SERVICE_ROLE_KEY to send invitation emails.",
+    };
   }
 
   const redirectTo = `${input.origin}${routes.authCallback}?next=${encodeURIComponent(acceptPath)}`;
@@ -39,7 +59,7 @@ export async function deliverInvitation(input: DeliveryInput): Promise<DeliveryR
     if (!error) return { delivered: true };
 
     if (!/already (been )?registered|already exists/i.test(error.message)) {
-      return { delivered: false, reason: error.message };
+      return failure(describe(error), error.status);
     }
 
     const mailer = createSupabaseMailerClient();
@@ -47,9 +67,9 @@ export async function deliverInvitation(input: DeliveryInput): Promise<DeliveryR
       email: input.email,
       options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
     });
-    return linkError ? { delivered: false, reason: linkError.message } : { delivered: true };
+    return linkError ? failure(describe(linkError), linkError.status) : { delivered: true };
   } catch (error) {
-    return { delivered: false, reason: error instanceof Error ? error.message : "Email delivery is not configured." };
+    return failure(error instanceof Error ? error.message : "Email delivery failed.");
   }
 }
 
@@ -79,8 +99,8 @@ async function sendWithResend(input: DeliveryInput, acceptUrl: string): Promise<
     });
     if (response.ok) return { delivered: true };
     const body = (await response.json().catch(() => null)) as { message?: string } | null;
-    return { delivered: false, reason: body?.message ?? `Resend responded ${response.status}` };
+    return failure(body?.message ?? `Resend responded ${response.status}`, response.status);
   } catch (error) {
-    return { delivered: false, reason: error instanceof Error ? error.message : "Resend request failed" };
+    return failure(error instanceof Error ? error.message : "Resend request failed");
   }
 }

@@ -1,6 +1,9 @@
+import type { DeliveryIssue } from "./delivery-issues";
+
 export interface UndeliveredInvite {
   email: string;
-  link: string;
+  /** The browser turns this into a link on the address maeosan is open at. */
+  token: string;
 }
 
 export interface InviteReport {
@@ -8,4 +11,6 @@ export interface InviteReport {
   alreadyMembers: string[];
   invalid: string[];
   undelivered: UndeliveredInvite[];
+  /** Why emails didn't go out, when some didn't. */
+  emailIssue: DeliveryIssue | null;
 }

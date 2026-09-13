@@ -28,6 +28,8 @@ export async function GET() {
 
   const body = {
     status: databaseOk ? "ok" : "degraded",
+    // The address sign-in and invitation links use; public by nature.
+    siteUrl: env.siteUrl,
     version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "dev",
     uptimeSeconds: Math.round(process.uptime()),
     checks: { database: { ok: databaseOk, latencyMs: Date.now() - started } },
