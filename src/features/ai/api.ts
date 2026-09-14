@@ -51,7 +51,23 @@ export interface StartedRun {
  * idempotent per message and agent.
  */
 export function requestAgentReplies(messageId: string, model?: string | null) {
-  return postJson<{ runs: StartedRun[] }>("/api/ai/runs", { messageId, model: model ?? null });
+  // Agents use the sender's clock for "today", message times and due dates.
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  return postJson<{ runs: StartedRun[] }>("/api/ai/runs", { messageId, model: model ?? null, timeZone });
+}
+
+/** Serverless instances go cold after a few idle minutes; this keeps one ready while someone is typing. */
+const WARM_EVERY_MS = 4 * 60_000;
+let warmedAt = 0;
+
+/** While someone writes to an agent: readies the reply server, so the answer starts sooner once they send. */
+export function warmAgentReplies() {
+  const now = Date.now();
+  if (now - warmedAt < WARM_EVERY_MS) return;
+  warmedAt = now;
+  void fetch("/api/ai/runs", { method: "GET", cache: "no-store", keepalive: true }).catch(() => {
+    warmedAt = 0;
+  });
 }
 
 export interface ArchitectResult {

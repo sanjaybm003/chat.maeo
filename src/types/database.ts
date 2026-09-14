@@ -467,6 +467,39 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      chat_webhooks: {
+        /** token_hash can't be selected by clients; list the other columns. */
+        Row: {
+          id: string;
+          workspace_id: string;
+          conversation_id: string;
+          name: string;
+          token_hash: string;
+          created_by: string | null;
+          created_at: string;
+          last_used_at: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      task_webhooks: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          name: string;
+          url: string;
+          format: "json" | "slack" | "discord";
+          events: string[];
+          created_by: string | null;
+          created_at: string;
+          last_delivered_at: string | null;
+          last_status: number | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {
@@ -691,6 +724,39 @@ export type Database = {
       set_integration_default_repo: {
         Args: { p_workspace_id: string; p_provider: string; p_repo: string | null };
         Returns: boolean;
+      };
+      /** Returns the webhook without its hash, plus `token`, the link's secret, shown this once. */
+      create_chat_webhook: {
+        Args: { p_conversation_id: string; p_name: string };
+        Returns: Json;
+      };
+      delete_chat_webhook: {
+        Args: { p_webhook_id: string };
+        Returns: boolean;
+      };
+      /** Service role only. */
+      post_webhook_message: {
+        Args: { p_webhook_id: string; p_token: string; p_body: string; p_name?: string | null };
+        Returns: string;
+      };
+      /** Returns the webhook plus `secret`, its signing secret, shown this once. */
+      create_task_webhook: {
+        Args: { p_workspace_id: string; p_name: string; p_url: string; p_format: string; p_events: string[] };
+        Returns: Json;
+      };
+      delete_task_webhook: {
+        Args: { p_webhook_id: string };
+        Returns: boolean;
+      };
+      /** Service role only. */
+      task_webhook_targets: {
+        Args: { p_workspace_id: string; p_event: string; p_webhook_id?: string | null };
+        Returns: { id: string; name: string; url: string; format: string; secret: string }[];
+      };
+      /** Service role only. */
+      record_task_webhook_delivery: {
+        Args: { p_webhook_id: string; p_status: number };
+        Returns: undefined;
       };
       health_check: {
         Args: NoArgs;

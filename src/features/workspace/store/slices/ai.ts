@@ -2,6 +2,22 @@ import { indexBy, isRunLive } from "../helpers";
 import type { AiSlice, SliceCreator } from "../types";
 
 export const createAiSlice: SliceCreator<AiSlice> = (set, _get, bootstrap) => ({
+  pendingReplies: {},
+
+  markRepliesPending: (conversationId, messageId, agentIds) =>
+    set((state) => ({
+      pendingReplies: { ...state.pendingReplies, [conversationId]: { messageId, agentIds, since: Date.now() } },
+    })),
+
+  clearPendingReplies: (conversationId, messageId) =>
+    set((state) => {
+      const current = state.pendingReplies[conversationId];
+      if (!current || (messageId && current.messageId !== messageId)) return {};
+      const pendingReplies = { ...state.pendingReplies };
+      delete pendingReplies[conversationId];
+      return { pendingReplies };
+    }),
+
   aiReady: bootstrap.ai.ready,
   aiModels: bootstrap.ai.models,
   aiWebSearch: bootstrap.ai.webSearch,

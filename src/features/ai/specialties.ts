@@ -7,7 +7,7 @@ import {
   type Specialty,
 } from "@/types/domain";
 
-import type { AiProvider } from "./models";
+import type { AiProvider, ModelStrength } from "./models";
 
 /**
  * What each kind of agent is for, and the defaults that make it good at it.
@@ -28,6 +28,8 @@ export interface SpecialtyProfile {
   temperature: number;
   /** Provider preference when several models fit the same tier. */
   providers: AiProvider[];
+  /** What automatic routing looks for in a model, after the provider preference. */
+  strengths: ModelStrength[];
 }
 
 export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
@@ -42,6 +44,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     baseline: 0.3,
     temperature: 0.6,
     providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
+    strengths: [],
   },
   research: {
     id: "research",
@@ -54,6 +57,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     baseline: 0.55,
     temperature: 0.3,
     providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
+    strengths: ["reasoning", "tools"],
   },
   writing: {
     id: "writing",
@@ -66,6 +70,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     baseline: 0.45,
     temperature: 0.8,
     providers: ["openai", "anthropic", "google", "deepseek", "bedrock"],
+    strengths: ["writing"],
   },
   analysis: {
     id: "analysis",
@@ -78,6 +83,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     baseline: 0.62,
     temperature: 0.2,
     providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
+    strengths: ["reasoning"],
   },
   planning: {
     id: "planning",
@@ -90,6 +96,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     baseline: 0.5,
     temperature: 0.4,
     providers: ["anthropic", "openai", "google", "deepseek", "bedrock"],
+    strengths: ["tools", "reasoning"],
   },
   support: {
     id: "support",
@@ -102,6 +109,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     baseline: 0.3,
     temperature: 0.4,
     providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
+    strengths: ["writing"],
   },
   engineering: {
     id: "engineering",
@@ -114,6 +122,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     baseline: 0.62,
     temperature: 0.2,
     providers: ["anthropic", "openai", "google", "deepseek", "bedrock"],
+    strengths: ["code", "tools"],
   },
 };
 

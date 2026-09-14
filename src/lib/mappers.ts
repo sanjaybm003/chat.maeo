@@ -139,6 +139,9 @@ function mapMeta(value: unknown): SystemMeta {
   const taskId = str(value.task_id);
   if (taskId) meta.task_id = taskId;
   if (typeof value.number === "number" && Number.isInteger(value.number)) meta.number = value.number;
+  if (value.source === "webhook") meta.source = "webhook";
+  const webhookId = str(value.webhook_id);
+  if (webhookId) meta.webhook_id = webhookId;
   return meta;
 }
 

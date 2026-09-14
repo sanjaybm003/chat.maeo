@@ -4,7 +4,7 @@
  * server (see server/env.ts).
  *
  * Prices are provider list prices in USD per million tokens, checked
- * 2026-09-13 against each provider's pricing page. Where a provider publishes a
+ * 2026-09-15 against each provider's pricing page. Where a provider publishes a
  * higher rate for peak hours or a scheduled increase, the higher one is used so
  * credits never under-charge.
  */
@@ -13,12 +13,22 @@
 export type AiProvider = "anthropic" | "google" | "openai" | "deepseek" | "bedrock";
 export type ModelTier = "fast" | "balanced" | "deep";
 
+/** What a model is noticeably good at, which automatic routing matches to the work. */
+export type ModelStrength = "code" | "writing" | "reasoning" | "tools" | "multilingual";
+
+/** 3 starts answering quickest; 1 thinks longest before its first word. */
+export type ModelSpeed = 1 | 2 | 3;
+
 export interface AiModel {
   id: string;
   provider: AiProvider;
+  /** Who made the model. For models Bedrock serves, that's the lab, not AWS. */
+  maker: string;
   label: string;
   tier: ModelTier;
   summary: string;
+  strengths: readonly ModelStrength[];
+  speed: ModelSpeed;
   inputPrice: number;
   outputPrice: number;
   contextWindow: number;
@@ -26,6 +36,8 @@ export interface AiModel {
   maxOutputTokens?: number;
   /** Newer reasoning models reject sampling parameters outright. */
   supportsTemperature: boolean;
+  /** Reasoning models that take a reasoning effort: low answers sooner, high thinks longer. */
+  reasoningEffort?: boolean;
   /** Provider-hosted web search, when the model has it. */
   webSearch: "anthropic-dynamic" | "anthropic-basic" | null;
   preview?: boolean;
@@ -45,13 +57,24 @@ export const TIER_LABELS: Record<ModelTier, string> = {
   deep: "Deep",
 };
 
+export const STRENGTH_LABELS: Record<ModelStrength, string> = {
+  code: "Code",
+  writing: "Writing",
+  reasoning: "Reasoning",
+  tools: "Tools",
+  multilingual: "Languages",
+};
+
 export const AI_MODELS: readonly AiModel[] = [
   {
     id: "claude-opus-5",
     provider: "anthropic",
+    maker: "Anthropic",
     label: "Claude Opus 5",
     tier: "deep",
     summary: "Careful, multi-step thinking for work that has to be right.",
+    strengths: ["code", "writing", "reasoning", "tools"],
+    speed: 1,
     inputPrice: 5,
     outputPrice: 25,
     contextWindow: 1_000_000,
@@ -61,9 +84,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "claude-sonnet-5",
     provider: "anthropic",
+    maker: "Anthropic",
     label: "Claude Sonnet 5",
     tier: "balanced",
     summary: "Sharp and quick at a fraction of Opus's cost.",
+    strengths: ["code", "writing", "reasoning", "tools"],
+    speed: 2,
     inputPrice: 2,
     outputPrice: 10,
     contextWindow: 1_000_000,
@@ -73,9 +99,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "claude-haiku-4-5",
     provider: "anthropic",
+    maker: "Anthropic",
     label: "Claude Haiku 4.5",
     tier: "fast",
     summary: "Instant answers, triage and quick rewrites.",
+    strengths: ["writing", "tools"],
+    speed: 3,
     inputPrice: 1,
     outputPrice: 5,
     contextWindow: 200_000,
@@ -85,9 +114,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "gpt-5.6-sol",
     provider: "openai",
+    maker: "OpenAI",
     label: "GPT-5.6 Sol",
     tier: "deep",
     summary: "OpenAI's strongest model with chat tool calling.",
+    strengths: ["code", "reasoning", "tools"],
+    speed: 1,
     inputPrice: 4,
     outputPrice: 20,
     contextWindow: 1_050_000,
@@ -97,9 +129,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "gpt-5.6-terra",
     provider: "openai",
+    maker: "OpenAI",
     label: "GPT-5.6 Terra",
     tier: "balanced",
     summary: "A strong everyday model that balances quality and cost.",
+    strengths: ["writing", "reasoning", "tools"],
+    speed: 2,
     inputPrice: 2,
     outputPrice: 12,
     contextWindow: 1_050_000,
@@ -109,9 +144,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "gpt-5.6-luna",
     provider: "openai",
+    maker: "OpenAI",
     label: "GPT-5.6 Luna",
     tier: "fast",
     summary: "Very cheap and fast for high-volume, simple jobs.",
+    strengths: ["tools"],
+    speed: 3,
     inputPrice: 0.2,
     outputPrice: 1.2,
     contextWindow: 1_050_000,
@@ -121,9 +159,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "gemini-3.1-pro-preview",
     provider: "google",
+    maker: "Google",
     label: "Gemini 3.1 Pro",
     tier: "deep",
     summary: "Google's most capable model, still in preview.",
+    strengths: ["reasoning", "code", "multilingual"],
+    speed: 1,
     inputPrice: 2,
     outputPrice: 12,
     contextWindow: 1_000_000,
@@ -135,9 +176,12 @@ export const AI_MODELS: readonly AiModel[] = [
     // Google lists $0.75 / $3.75 until 31 Dec 2026, then $1.50 / $7.50.
     id: "gemini-3.8-flash",
     provider: "google",
+    maker: "Google",
     label: "Gemini 3.8 Flash",
     tier: "balanced",
     summary: "Fast, capable and generous with long conversations.",
+    strengths: ["writing", "multilingual", "tools"],
+    speed: 2,
     inputPrice: 1.5,
     outputPrice: 7.5,
     contextWindow: 1_000_000,
@@ -147,9 +191,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "gemini-3.5-flash-lite",
     provider: "google",
+    maker: "Google",
     label: "Gemini 3.5 Flash-Lite",
     tier: "fast",
     summary: "Light and inexpensive for quick lookups and summaries.",
+    strengths: ["multilingual"],
+    speed: 3,
     inputPrice: 0.3,
     outputPrice: 2.5,
     contextWindow: 1_000_000,
@@ -160,9 +207,12 @@ export const AI_MODELS: readonly AiModel[] = [
     // DeepSeek's peak-hour rates; off-peak is half.
     id: "deepseek-v4-pro",
     provider: "deepseek",
+    maker: "DeepSeek",
     label: "DeepSeek V4 Pro",
     tier: "deep",
     summary: "Strong reasoning at a low price.",
+    strengths: ["reasoning", "code"],
+    speed: 1,
     inputPrice: 1.32,
     outputPrice: 3.96,
     contextWindow: 1_000_000,
@@ -172,23 +222,34 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "deepseek-flash",
     provider: "deepseek",
+    maker: "DeepSeek",
     label: "DeepSeek Flash",
     tier: "fast",
     summary: "The cheapest capable option for everyday chat.",
+    strengths: ["code"],
+    speed: 3,
     inputPrice: 0.3,
     outputPrice: 1.2,
     contextWindow: 1_000_000,
     supportsTemperature: true,
     webSearch: null,
   },
+
   // Open models on Amazon Bedrock, at Bedrock's us-east-1 on-demand prices. Ids are
-  // the bedrock-mantle endpoint's; they run with the same Bedrock API key as Claude.
+  // the bedrock-mantle endpoint's, checked against each model card; all of them take
+  // Chat Completions with tool calling and run on the same Bedrock API key as Claude.
+  // Within a tier, earlier entries win ties in automatic routing.
+
+  // Deep
   {
     id: "deepseek.v3.2",
     provider: "bedrock",
+    maker: "DeepSeek",
     label: "DeepSeek V3.2",
     tier: "deep",
     summary: "Careful reasoning for analysis and hard questions.",
+    strengths: ["reasoning", "code"],
+    speed: 1,
     inputPrice: 0.62,
     outputPrice: 1.85,
     contextWindow: 164_000,
@@ -197,11 +258,48 @@ export const AI_MODELS: readonly AiModel[] = [
     webSearch: null,
   },
   {
+    id: "moonshotai.kimi-k2.5",
+    provider: "bedrock",
+    maker: "Moonshot AI",
+    label: "Kimi K2.5",
+    tier: "deep",
+    summary: "Strong at multi-step work with tools, code and long documents.",
+    strengths: ["code", "tools", "reasoning", "multilingual"],
+    speed: 1,
+    inputPrice: 0.6,
+    outputPrice: 3,
+    contextWindow: 256_000,
+    maxOutputTokens: 16_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "zai.glm-5",
+    provider: "bedrock",
+    maker: "Z.ai",
+    label: "GLM 5",
+    tier: "deep",
+    summary: "Built for long, multi-step engineering and agent work.",
+    strengths: ["code", "tools", "reasoning"],
+    speed: 1,
+    inputPrice: 1,
+    outputPrice: 3.2,
+    contextWindow: 200_000,
+    maxOutputTokens: 128_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+
+  // Balanced
+  {
     id: "qwen.qwen3-235b-a22b-2507",
     provider: "bedrock",
+    maker: "Qwen",
     label: "Qwen3 235B",
     tier: "balanced",
     summary: "Follows detailed instructions well in long conversations.",
+    strengths: ["writing", "multilingual", "tools"],
+    speed: 2,
     inputPrice: 0.53,
     outputPrice: 2.66,
     contextWindow: 256_000,
@@ -212,9 +310,12 @@ export const AI_MODELS: readonly AiModel[] = [
   {
     id: "mistral.mistral-large-3-675b-instruct",
     provider: "bedrock",
+    maker: "Mistral AI",
     label: "Mistral Large 3",
     tier: "balanced",
     summary: "Clear writing and summaries across long threads.",
+    strengths: ["writing", "multilingual"],
+    speed: 2,
     inputPrice: 0.5,
     outputPrice: 1.5,
     contextWindow: 256_000,
@@ -223,29 +324,295 @@ export const AI_MODELS: readonly AiModel[] = [
     webSearch: null,
   },
   {
+    id: "nvidia.nemotron-super-3-120b",
+    provider: "bedrock",
+    maker: "NVIDIA",
+    label: "Nemotron 3 Super",
+    tier: "balanced",
+    summary: "Fast, accurate agent work over long threads at a low price.",
+    strengths: ["tools", "reasoning"],
+    speed: 3,
+    inputPrice: 0.15,
+    outputPrice: 0.65,
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "minimax.minimax-m2.5",
+    provider: "bedrock",
+    maker: "MiniMax",
+    label: "MiniMax M2.5",
+    tier: "balanced",
+    summary: "Plans and finishes multi-step tasks quickly.",
+    strengths: ["tools", "code", "reasoning"],
+    speed: 2,
+    inputPrice: 0.3,
+    outputPrice: 1.2,
+    contextWindow: 196_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "mistral.devstral-2-123b",
+    provider: "bedrock",
+    maker: "Mistral AI",
+    label: "Devstral 2",
+    tier: "balanced",
+    summary: "Mistral's coding model for reviews, fixes and refactors.",
+    strengths: ["code", "tools"],
+    speed: 2,
+    inputPrice: 0.4,
+    outputPrice: 2,
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "qwen.qwen3-coder-next",
+    provider: "bedrock",
+    maker: "Qwen",
+    label: "Qwen3 Coder Next",
+    tier: "balanced",
+    summary: "Writes, debugs and explains code across large files.",
+    strengths: ["code", "tools"],
+    speed: 2,
+    inputPrice: 0.5,
+    outputPrice: 1.2,
+    contextWindow: 256_000,
+    maxOutputTokens: 16_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "mistral.magistral-small-2509",
+    provider: "bedrock",
+    maker: "Mistral AI",
+    label: "Magistral Small",
+    tier: "balanced",
+    summary: "Mistral's reasoning model for maths, logic and step-by-step problems.",
+    strengths: ["reasoning"],
+    speed: 2,
+    inputPrice: 0.5,
+    outputPrice: 1.5,
+    contextWindow: 128_000,
+    maxOutputTokens: 40_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "zai.glm-4.7",
+    provider: "bedrock",
+    maker: "Z.ai",
+    label: "GLM 4.7",
+    tier: "balanced",
+    summary: "Strong multilingual reasoning, best for shorter answers.",
+    strengths: ["multilingual", "reasoning", "code"],
+    speed: 2,
+    inputPrice: 0.6,
+    outputPrice: 2.2,
+    contextWindow: 203_000,
+    maxOutputTokens: 4_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+
+  // Fast
+  {
     id: "openai.gpt-oss-120b",
     provider: "bedrock",
+    maker: "OpenAI",
     label: "gpt-oss 120B",
     tier: "fast",
     summary: "OpenAI’s open model: quick, low-cost everyday answers.",
+    strengths: ["reasoning", "tools"],
+    speed: 3,
     inputPrice: 0.15,
     outputPrice: 0.6,
     contextWindow: 128_000,
     maxOutputTokens: 16_000,
     supportsTemperature: false,
+    reasoningEffort: true,
+    webSearch: null,
+  },
+  {
+    id: "qwen.qwen3-next-80b-a3b-instruct",
+    provider: "bedrock",
+    maker: "Qwen",
+    label: "Qwen3 Next 80B",
+    tier: "fast",
+    summary: "Very quick answers that hold up in long conversations.",
+    strengths: ["multilingual", "tools"],
+    speed: 3,
+    inputPrice: 0.15,
+    outputPrice: 1.2,
+    contextWindow: 256_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "google.gemma-3-27b-it",
+    provider: "bedrock",
+    maker: "Google",
+    label: "Gemma 3 27B",
+    tier: "fast",
+    summary: "Google’s largest open model: clear, multilingual everyday answers.",
+    strengths: ["writing", "multilingual"],
+    speed: 2,
+    inputPrice: 0.23,
+    outputPrice: 0.38,
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "mistral.ministral-3-14b-instruct",
+    provider: "bedrock",
+    maker: "Mistral AI",
+    label: "Ministral 14B",
+    tier: "fast",
+    summary: "Compact and quick, with solid writing.",
+    strengths: ["writing", "multilingual"],
+    speed: 3,
+    inputPrice: 0.2,
+    outputPrice: 0.2,
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "qwen.qwen3-coder-30b-a3b-instruct",
+    provider: "bedrock",
+    maker: "Qwen",
+    label: "Qwen3 Coder 30B",
+    tier: "fast",
+    summary: "Quick code answers, snippets and explanations.",
+    strengths: ["code"],
+    speed: 3,
+    inputPrice: 0.15,
+    outputPrice: 1.2,
+    contextWindow: 256_000,
+    maxOutputTokens: 16_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "zai.glm-4.7-flash",
+    provider: "bedrock",
+    maker: "Z.ai",
+    label: "GLM 4.7 Flash",
+    tier: "fast",
+    summary: "Very fast, low-cost answers for everyday chat.",
+    strengths: ["multilingual"],
+    speed: 3,
+    inputPrice: 0.07,
+    outputPrice: 0.4,
+    contextWindow: 203_000,
+    maxOutputTokens: 4_000,
+    supportsTemperature: true,
     webSearch: null,
   },
   {
     id: "openai.gpt-oss-20b",
     provider: "bedrock",
+    maker: "OpenAI",
     label: "gpt-oss 20B",
     tier: "fast",
-    summary: "The lightest option for short, simple replies.",
+    summary: "The lightest OpenAI option for short, simple replies.",
+    strengths: [],
+    speed: 3,
     inputPrice: 0.07,
     outputPrice: 0.2,
     contextWindow: 128_000,
     maxOutputTokens: 16_000,
     supportsTemperature: false,
+    reasoningEffort: true,
+    webSearch: null,
+  },
+  {
+    id: "mistral.ministral-3-8b-instruct",
+    provider: "bedrock",
+    maker: "Mistral AI",
+    label: "Ministral 8B",
+    tier: "fast",
+    summary: "Low-cost quick replies and rewrites.",
+    strengths: ["multilingual"],
+    speed: 3,
+    inputPrice: 0.15,
+    outputPrice: 0.15,
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "google.gemma-3-12b-it",
+    provider: "bedrock",
+    maker: "Google",
+    label: "Gemma 3 12B",
+    tier: "fast",
+    summary: "Light, multilingual answers at a very low price.",
+    strengths: ["multilingual"],
+    speed: 3,
+    inputPrice: 0.09,
+    outputPrice: 0.29,
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "nvidia.nemotron-nano-9b-v2",
+    provider: "bedrock",
+    maker: "NVIDIA",
+    label: "Nemotron Nano 9B",
+    tier: "fast",
+    summary: "Tiny and quick, with light reasoning.",
+    strengths: ["reasoning"],
+    speed: 3,
+    inputPrice: 0.06,
+    outputPrice: 0.23,
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "mistral.ministral-3-3b-instruct",
+    provider: "bedrock",
+    maker: "Mistral AI",
+    label: "Ministral 3B",
+    tier: "fast",
+    summary: "The smallest Mistral, for instant one-liners.",
+    strengths: [],
+    speed: 3,
+    inputPrice: 0.1,
+    outputPrice: 0.1,
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "google.gemma-3-4b-it",
+    provider: "bedrock",
+    maker: "Google",
+    label: "Gemma 3 4B",
+    tier: "fast",
+    summary: "The cheapest option, for tiny jobs like tagging or rephrasing.",
+    strengths: [],
+    speed: 3,
+    inputPrice: 0.04,
+    outputPrice: 0.08,
+    contextWindow: 128_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
     webSearch: null,
   },
 ];
@@ -256,6 +623,9 @@ export function findModel(id: string | null | undefined): AiModel | null {
   return id ? (BY_ID.get(id) ?? null) : null;
 }
 
+/** The ids Bedrock's own catalog is checked against; see server/env.ts. */
+export const BEDROCK_MODEL_IDS: ReadonlySet<string> = new Set(AI_MODELS.filter((model) => model.provider === "bedrock").map((model) => model.id));
+
 /** Drafting agents needs careful instruction-following, not deep reasoning. */
 export const ARCHITECT_MODEL_PREFERENCE = [
   "claude-sonnet-5",
@@ -264,6 +634,7 @@ export const ARCHITECT_MODEL_PREFERENCE = [
   "gpt-5.6-terra",
   "deepseek-v4-pro",
   "qwen.qwen3-235b-a22b-2507",
+  "moonshotai.kimi-k2.5",
   "deepseek.v3.2",
   "mistral.mistral-large-3-675b-instruct",
 ] as const;

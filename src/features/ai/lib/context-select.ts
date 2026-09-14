@@ -58,6 +58,13 @@ export function keywords(text: string, limit = 12): string[] {
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** Quick questions read less of the chat, so they start sooner; hard ones read more. */
+export function contextBudget(complexity: number) {
+  if (complexity < 0.4) return { maxChars: 12_000, keepRecent: 8 };
+  if (complexity < 0.68) return { maxChars: 24_000, keepRecent: 12 };
+  return { maxChars: 40_000, keepRecent: 16 };
+}
+
 export function selectContext<T extends ContextMessage>(
   history: readonly T[],
   question: { body: string; replyToId: string | null },

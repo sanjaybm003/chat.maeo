@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import type { AiModel } from "../models";
 import { providerClient } from "./providers";
-import type { StepUsage } from "./providers/types";
+import type { ReasoningEffort, StepUsage } from "./providers/types";
 
 /**
  * The double-check: a second read of a finished reply against the
@@ -18,6 +18,8 @@ Check, strictly against that material:
 - Every claim about the team, its work, numbers, names, dates, links and code is supported by the conversation, the evidence or the team knowledge.
 - The draft answers exactly what was asked, in the format asked for, and follows the agent's rules.
 - Nothing is presented as done that wasn't done: a pull request opened is not merged, a task created is not finished.
+- "Today", "latest" and other relative dates are judged against the date you're given, never against what you remember.
+- Any concern listed was raised by an automatic check of the draft. Resolve each one.
 
 If the draft is accurate and complete, return verdict "ok", no issues and an empty reply.
 Otherwise return verdict "revise", each issue in a few words, and the full corrected reply. Keep everything that was right, and keep the same voice, format and language. Never add facts that aren't in the material; where something can't be confirmed, say so plainly in the reply.`;
@@ -46,8 +48,13 @@ export interface ReviewInput {
   request: string;
   evidence: readonly string[];
   draft: string;
+  /** Problems an automatic check found in the draft, like links nothing it read contains. */
+  concerns?: readonly string[];
+  /** The asker's current date and time, in words. */
+  today?: string;
   signal: AbortSignal;
   maxOutputTokens: number;
+  effort?: ReasoningEffort;
 }
 
 export interface ReviewOutcome {
@@ -60,8 +67,15 @@ export interface ReviewOutcome {
 
 const MAX_EVIDENCE_CHARS = 16_000;
 
-export function buildReviewPrompt({ rules, request, evidence, draft }: Pick<ReviewInput, "rules" | "request" | "evidence" | "draft">) {
-  return `<agent_rules>
+export function buildReviewPrompt({
+  rules,
+  request,
+  evidence,
+  draft,
+  concerns = [],
+  today,
+}: Pick<ReviewInput, "rules" | "request" | "evidence" | "draft" | "concerns" | "today">) {
+  return `${today ? `<today>${today}</today>\n\n` : ""}<agent_rules>
 ${rules.trim() || "(none)"}
 </agent_rules>
 
@@ -72,7 +86,15 @@ ${request}
 <evidence>
 ${evidence.join("\n\n").slice(0, MAX_EVIDENCE_CHARS) || "(The agent used no tools.)"}
 </evidence>
-
+${
+  concerns.length > 0
+    ? `
+<concerns>
+${concerns.map((concern) => `- ${concern}`).join("\n")}
+</concerns>
+`
+    : ""
+}
 <draft_reply>
 ${draft}
 </draft_reply>`;
@@ -87,6 +109,7 @@ export async function reviewReply(input: ReviewInput): Promise<ReviewOutcome> {
     parse: (value) => reviewSchema.parse(value),
     maxOutputTokens: input.maxOutputTokens,
     signal: input.signal,
+    effort: input.effort,
   });
   return { ...result.value, usage: result.usage, model: result.model ?? input.model };
 }

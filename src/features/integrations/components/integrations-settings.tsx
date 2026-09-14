@@ -17,6 +17,7 @@ import type { Integration } from "@/types/domain";
 
 import { listGithubRepositories, type RepositoryOption } from "../actions";
 import { disconnectIntegration, githubInstallPath, setDefaultRepository } from "../api";
+import { WebhooksSettings } from "./webhooks-settings";
 
 export interface IntegrationStatus {
   connected: string | null;
@@ -62,6 +63,7 @@ export function IntegrationsSettings({ status }: { status: IntegrationStatus }) 
   return (
     <div>
       <GithubSection />
+      <WebhooksSettings />
       <WebSection />
     </div>
   );

@@ -17,6 +17,7 @@ function continues(previous: Message | undefined, message: Message | undefined) 
     message.kind === "text" &&
     previous.senderId === message.senderId &&
     previous.agentId === message.agentId &&
+    previous.meta.webhook_id === message.meta.webhook_id &&
     sameDay(previous.createdAt, message.createdAt) &&
     minutesApart(previous.createdAt, message.createdAt) <= MESSAGE_GROUP_WINDOW_MINUTES
   );

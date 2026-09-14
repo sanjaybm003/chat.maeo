@@ -37,7 +37,7 @@ describe("create_task", () => {
       data: { number: 5, title: "Send the invoice", status: "todo", due_on: "2026-09-18", assignee_id: "u-sam", agent_id: null },
       error: null,
     }));
-    const context = { admin: { rpc } as never, directory, workspaceId: "w", conversationId: "c", userId: "u-asker", agentId: "a-scout" };
+    const context = { admin: { rpc } as never, directory, workspaceId: "w", conversationId: "c", userId: "u-asker", agentId: "a-scout", timeZone: "UTC" };
 
     const output = await executeTaskTool(
       { id: "1", name: "create_task", input: { title: "Send the invoice", assignee: "Sam", due_on: "2026-09-18", priority: "high" } },
@@ -56,7 +56,7 @@ describe("create_task", () => {
 
   it("passes the database's reason back so the agent can explain it", async () => {
     const rpc = vi.fn(async () => ({ data: null, error: { code: "22023", message: "That person isn't in this workspace." } }));
-    const context = { admin: { rpc } as never, directory, workspaceId: "w", conversationId: "c", userId: "u-asker", agentId: "a-scout" };
+    const context = { admin: { rpc } as never, directory, workspaceId: "w", conversationId: "c", userId: "u-asker", agentId: "a-scout", timeZone: "UTC" };
     await expect(executeTaskTool({ id: "1", name: "create_task", input: { title: "x", assignee: "Priya" } }, context)).rejects.toThrow(
       "That person isn't in this workspace.",
     );

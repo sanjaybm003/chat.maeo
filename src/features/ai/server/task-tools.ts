@@ -1,15 +1,19 @@
 import "server-only";
 
+import type { TaskEvent } from "@/features/integrations/lib/task-events";
+import { deliverTaskEvent } from "@/features/integrations/server/task-webhooks";
 import { parseQuickTask } from "@/features/tasks/lib/quick-task";
 import { TASK_PRIORITIES, TASK_STATUSES, type AgentRunStep } from "@/types/domain";
 
+import { localToday } from "../lib/time";
 import type { AdminClient, NameDirectory } from "./directory";
 import type { ToolCall, ToolSpec } from "./providers/types";
 import { ToolInputError } from "./tool-errors";
 
 /**
  * Agents work with the team's tasks on behalf of the person who asked: every
- * change runs through the same database rules as a person's, credited to both.
+ * change runs through the same database rules as a person's, credited to both,
+ * and reaches the apps the workspace connected just like a person's change.
  */
 
 export interface TaskToolContext {
@@ -19,6 +23,11 @@ export interface TaskToolContext {
   conversationId: string;
   userId: string;
   agentId: string;
+  /** The asker's time zone, so "friday" is their Friday. */
+  timeZone: string;
+  agentName?: string;
+  /** Where deliveries to connected apps are collected, so the run can wait for them; without it none are sent. */
+  background?: Promise<unknown>[];
 }
 
 const STATUS_WORDS = "todo, in_progress, blocked, done or cancelled";
@@ -133,10 +142,10 @@ export function resolveAssignee(raw: string, { directory, userId }: Pick<TaskToo
   );
 }
 
-function dueDate(raw: string): string {
+function dueDate(raw: string, timeZone: string): string {
   const value = raw.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const understood = parseQuickTask(`due ${value}`, { members: [], agents: [] }).dueOn;
+  const understood = parseQuickTask(`due ${value}`, { members: [], agents: [] }, localToday(timeZone)).dueOn;
   if (!understood) throw new ToolInputError(`"${raw}" isn't a date. Give due dates as YYYY-MM-DD.`);
   return understood;
 }
@@ -151,7 +160,25 @@ function friendly(error: { code?: string; message: string }): never {
   throw error;
 }
 
-async function saveTask(context: TaskToolContext, taskId: string | null, fields: Record<string, string | null>) {
+interface SavedTask {
+  id: string;
+  number: number;
+  title: string;
+  status: string;
+  due_on: string | null;
+  assignee_id: string | null;
+  agent_id: string | null;
+}
+
+/** What a save was, for the apps listening to the workspace's tasks. */
+export function taskToolEvent(isNew: boolean, fields: Record<string, string | null>, previousStatus: string | null, saved: SavedTask): TaskEvent {
+  if (isNew) return "task.created";
+  if (saved.status === "done" && previousStatus !== "done") return "task.completed";
+  const reassigned = ("assignee_id" in fields || "agent_id" in fields) && Boolean(saved.assignee_id || saved.agent_id);
+  return reassigned ? "task.assigned" : "task.updated";
+}
+
+async function saveTask(context: TaskToolContext, taskId: string | null, fields: Record<string, string | null>, previousStatus: string | null = null) {
   const { data, error } = await context.admin.rpc("ai_save_task", {
     p_user_id: context.userId,
     p_agent_id: context.agentId,
@@ -160,7 +187,16 @@ async function saveTask(context: TaskToolContext, taskId: string | null, fields:
     p_fields: fields,
   });
   if (error) friendly(error);
-  return data as { number: number; title: string; status: string; due_on: string | null; assignee_id: string | null; agent_id: string | null };
+  const task = data as unknown as SavedTask;
+  // Connected apps hear about it without holding up the reply.
+  context.background?.push(
+    deliverTaskEvent(context.admin, {
+      event: taskToolEvent(!taskId, fields, previousStatus, task),
+      taskId: task.id,
+      actorName: `${context.agentName ?? "An agent"} for ${context.directory.personName(context.userId)}`,
+    }).catch(() => 0),
+  );
+  return task;
 }
 
 async function listTasks(input: Record<string, unknown>, context: TaskToolContext) {
@@ -206,7 +242,7 @@ async function createTask(input: Record<string, unknown>, context: TaskToolConte
     fields.assignee_id = assignment.assigneeId;
     fields.agent_id = assignment.agentId;
   }
-  if (clean(input.due_on, 40)) fields.due_on = dueDate(clean(input.due_on, 40));
+  if (clean(input.due_on, 40)) fields.due_on = dueDate(clean(input.due_on, 40), context.timeZone);
   if ((TASK_PRIORITIES as readonly string[]).includes(clean(input.priority, 10))) fields.priority = clean(input.priority, 10);
 
   const task = await saveTask(context, null, fields);
@@ -220,7 +256,7 @@ async function updateTask(input: Record<string, unknown>, context: TaskToolConte
 
   const { data: row, error } = await context.admin
     .from("tasks")
-    .select("id")
+    .select("id, status")
     .eq("workspace_id", context.workspaceId)
     .eq("number", number)
     .maybeSingle();
@@ -246,12 +282,12 @@ async function updateTask(input: Record<string, unknown>, context: TaskToolConte
     fields.agent_id = assignment.agentId;
   }
   const due = clean(input.due_on, 40);
-  if (due) fields.due_on = /^(none|no|null|clear|remove)$/i.test(due) ? null : dueDate(due);
+  if (due) fields.due_on = /^(none|no|null|clear|remove)$/i.test(due) ? null : dueDate(due, context.timeZone);
 
   if (Object.keys(fields).length === 0) {
     throw new ToolInputError("Say what to change: status, title, description, assignee, due_on or priority.");
   }
-  const task = await saveTask(context, row.id, fields);
+  const task = await saveTask(context, row.id, fields, row.status);
   return `Updated T-${task.number}: ${task.title} · ${task.status} · ${describeWho(context.directory, task)}${task.due_on ? ` · due ${task.due_on}` : ""}.`;
 }
 

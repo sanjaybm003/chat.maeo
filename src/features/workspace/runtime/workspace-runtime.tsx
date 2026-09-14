@@ -32,9 +32,14 @@ function wakeAgents(store: WorkspaceStore, message: Message, entry: OutboxEntry)
   const { aiReady, agents, conversations } = store.getState();
   const replyTo = message.replyTo ?? entry.replyTo;
   if (!aiReady || agentsToWake(message.body, conversations[message.conversationId], agents, replyTo).length === 0) return;
-  requestAgentReplies(message.id, entry.agentModel).catch((error: unknown) => {
-    toast.error(error instanceof AiRequestError ? error.message : "The agent couldn't start. Try again.");
-  });
+  requestAgentReplies(message.id, entry.agentModel)
+    .then(({ runs }) => {
+      if (runs.length === 0) store.getState().clearPendingReplies(message.conversationId, message.id);
+    })
+    .catch((error: unknown) => {
+      store.getState().clearPendingReplies(message.conversationId, message.id);
+      toast.error(error instanceof AiRequestError ? error.message : "The agent couldn't start. Try again.");
+    });
 }
 
 function createRuntime(store: WorkspaceStore): WorkspaceRuntime {

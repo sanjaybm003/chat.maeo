@@ -3,6 +3,8 @@
 import { useMemo } from "react";
 import { toast } from "sonner";
 
+import { reportTaskEvent } from "@/features/integrations/api";
+import { taskEventFor } from "@/features/integrations/lib/task-events";
 import { useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
 import { withRetry } from "@/lib/async/retry";
 import { getErrorMessage } from "@/lib/errors";
@@ -30,7 +32,8 @@ export function applyTaskChanges(task: Task, changes: TaskChanges, now = new Dat
 
 /**
  * Task changes show at once and roll back if the server refuses. A newer copy
- * that arrived in the meantime is never overwritten by the rollback.
+ * that arrived in the meantime is never overwritten by the rollback. Saved
+ * changes are reported to any apps the workspace connected.
  */
 export function useTaskActions() {
   const store = useWorkspaceStore();
@@ -42,6 +45,7 @@ export function useTaskActions() {
       async create(input: NewTask) {
         const task = await createTask(state().workspace.id, input);
         state().upsertTask(task);
+        reportTaskEvent(task.id, "task.created");
         return task;
       },
 
@@ -51,6 +55,8 @@ export function useTaskActions() {
         try {
           const saved = await withRetry(() => updateTask(task.id, changes));
           state().upsertTask(saved);
+          const event = taskEventFor(before, saved);
+          if (event) reportTaskEvent(saved.id, event);
           return saved;
         } catch (error) {
           state().upsertTask(before);

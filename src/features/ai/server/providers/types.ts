@@ -59,6 +59,8 @@ export interface StepHooks {
   onActivity?: (step: AgentRunStep) => void;
 }
 
+export type ReasoningEffort = "low" | "medium" | "high";
+
 export interface SessionOptions {
   model: AiModel;
   system: string;
@@ -67,6 +69,8 @@ export interface SessionOptions {
   webSearch: boolean;
   maxOutputTokens: number;
   temperature?: number;
+  /** How long a reasoning model may think before answering, where the model takes it. */
+  effort?: ReasoningEffort;
 }
 
 /** One conversation with a model. The session keeps the provider's own history format. */
@@ -83,6 +87,7 @@ export interface StructuredRequest<T> {
   parse: (value: unknown) => T;
   maxOutputTokens: number;
   signal?: AbortSignal;
+  effort?: ReasoningEffort;
 }
 
 export interface AiProviderClient {

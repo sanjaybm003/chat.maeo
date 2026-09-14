@@ -9,6 +9,7 @@ import { LocalTime } from "@/components/ui/local-time";
 import { Spinner } from "@/components/ui/spinner";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { AgentIntro } from "@/features/ai/components/agent-intro";
+import { PendingReplies } from "@/features/ai/components/pending-replies";
 import { TaskCard } from "@/features/tasks/components/task-card";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
@@ -276,6 +277,7 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
           {lastMessage && lastMessage.senderId === me.id && lastMessage.kind === "text" && lastMessage.delivery === "sent" ? (
             <ReadReceipt conversation={conversation} message={lastMessage} />
           ) : null}
+          <PendingReplies conversationId={conversationId} />
           <TypingIndicator conversationId={conversationId} />
         </div>
       </div>

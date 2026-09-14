@@ -5,6 +5,8 @@ vi.mock("@/lib/logger", () => {
   const quiet = { debug() {}, info() {}, warn() {}, error() {}, child: () => quiet };
   return { logger: quiet };
 });
+// Every site resolves to a public address, so page reads never touch real DNS.
+vi.mock("node:dns/promises", () => ({ lookup: async () => [{ address: "93.184.216.34", family: 4 }] }));
 
 const load = () => import("./web");
 
@@ -71,10 +73,65 @@ describe("searchWeb", () => {
     const findings = await searchWeb("latest next.js release", new AbortController().signal);
 
     expect(findings).toMatchObject({ engine: "bedrock-web-search", sources: [{ title: "Next.js blog", url: "https://nextjs.org/blog" }] });
+    expect(findings.excerpts).toBeUndefined();
     expect(findings.credits).toBe(26);
     const text = formatFindings("latest next.js release", { ...findings, sources: [...findings.sources, { title: "dup", url: "https://nextjs.org/blog/" }] });
     expect(text).toContain("[1] Next.js blog <https://nextjs.org/blog>");
     expect(text).not.toContain("[2]");
+  });
+
+  it("dates the search, then reads the top sources for a deep search and keeps the passages that answer it", async () => {
+    const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, body: typeof init?.body === "string" ? JSON.parse(init.body) : null });
+        if (url.endsWith("/responses")) {
+          return Response.json({
+            output: [
+              { type: "web_search_call" },
+              {
+                type: "message",
+                content: [
+                  {
+                    type: "output_text",
+                    text: "- Next.js 16.3 shipped.",
+                    annotations: [
+                      { type: "url_citation", title: "Pin", url: "https://www.pinterest.com/pin/1" },
+                      { type: "url_citation", title: "Next.js 16.3", url: "https://nextjs.org/blog/next-16-3" },
+                    ],
+                  },
+                ],
+              },
+            ],
+            usage: { input_tokens: 1000, output_tokens: 100 },
+          });
+        }
+        return new Response(
+          "<html><head><title>Next.js 16.3</title></head><body><p>Subscribe to our newsletter for more updates from the whole team.</p><p>Next.js 16.3 was released on August 20, 2026 with a faster dev server and a stable proxy.</p></body></html>",
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        );
+      }),
+    );
+    const { searchWeb, formatFindings } = await load();
+
+    const findings = await searchWeb("latest next.js release date", new AbortController().signal, {
+      depth: "deep",
+      today: "Tuesday 15 September 2026, 09:05",
+    });
+
+    const search = requests.find((request) => request.url.endsWith("/responses"));
+    expect(String(search?.body?.instructions)).toContain("It is Tuesday 15 September 2026, 09:05");
+    expect(String(search?.body?.input)).toMatch(/^latest next\.js release date \d{4}$/);
+    expect(requests.map((request) => request.url)).toContain("https://nextjs.org/blog/next-16-3");
+    // The official page is read first; the weak source comes last.
+    expect(findings.excerpts?.[0]).toMatchObject({ title: "Next.js 16.3", url: "https://nextjs.org/blog/next-16-3" });
+    expect(findings.excerpts?.[0].text).toContain("released on August 20, 2026");
+    expect(findings.excerpts?.[0].text).not.toContain("newsletter");
+    const text = formatFindings("latest next.js release date", findings);
+    expect(text).toContain("[1] Next.js 16.3 <https://nextjs.org/blog/next-16-3>");
+    expect(text).toContain('<source url="https://nextjs.org/blog/next-16-3" title="Next.js 16.3">');
   });
 
   it("falls back to Nova grounding when the account can't use Bedrock's search, and remembers that", async () => {

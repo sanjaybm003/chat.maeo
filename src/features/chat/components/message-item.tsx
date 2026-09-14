@@ -23,9 +23,10 @@ import { cn, joinNames, nameOf } from "@/lib/utils";
 import type { Agent, Member, Message, PersonColor, ReplyPreview } from "@/types/domain";
 
 import type { MessageActions } from "../hooks/use-message-actions";
-import { attachmentSummary } from "../lib/conversation-meta";
+import { appSenderName, attachmentSummary } from "../lib/conversation-meta";
 import { formatMessageBody, isEmojiOnly } from "../lib/format-message";
 import { groupReactions } from "../lib/timeline";
+import { AppAvatar, AppTag } from "./app-avatar";
 import { AttachmentGrid } from "./attachments";
 import { ReactionPicker } from "./reaction-picker";
 
@@ -73,6 +74,8 @@ export const MessageItem = memo(function MessageItem({
 
   const deleted = Boolean(message.deletedAt);
   const isAgent = Boolean(message.agentId);
+  /** An app that posted through an incoming webhook. */
+  const app = appSenderName(message);
   const live = isRunLive(message);
   const emojiOnly =
     !deleted && !isAgent && message.attachments.length === 0 && !message.replyTo && isEmojiOnly(message.body);
@@ -105,7 +108,13 @@ export const MessageItem = memo(function MessageItem({
       {!mine ? (
         <div className="w-9 shrink-0 pt-0.5">
           {startsGroup ? (
-            isAgent ? <AgentAvatar agent={agent} size="md" working={live} /> : <Avatar person={sender} size="md" />
+            isAgent ? (
+              <AgentAvatar agent={agent} size="md" working={live} />
+            ) : app ? (
+              <AppAvatar name={app} />
+            ) : (
+              <Avatar person={sender} size="md" />
+            )
           ) : null}
         </div>
       ) : null}
@@ -126,6 +135,11 @@ export const MessageItem = memo(function MessageItem({
               >
                 {agent?.name ?? "Removed agent"}
                 <AgentTag />
+              </span>
+            ) : app ? (
+              <span className="flex items-center gap-1.5 self-center text-[13px] font-semibold text-ink">
+                {app}
+                <AppTag />
               </span>
             ) : showName && !mine ? (
               <span className="text-[13px] font-semibold text-person-ink" style={sender ? personColorStyle(sender.color) : undefined}>

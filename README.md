@@ -35,9 +35,16 @@ Built with Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4 and Sup
 
 **AI agents**
 - Describe an agent in plain words, add it to any chat, or talk to it one-to-one; replies use each person's AI credits
-- Automatic model routing, web search with sources, and tools to read the conversation, search the workspace and manage tasks
+- Models from Anthropic, OpenAI, Google and DeepSeek, plus open models on Amazon Bedrock: Mistral (Large 3, Devstral 2, Magistral, Ministral), Google Gemma 3, Qwen3 (Coder, Next), Kimi K2.5, MiniMax M2.5, NVIDIA Nemotron, Z.ai GLM, DeepSeek and gpt-oss. Pickers only offer the models Bedrock lists for your key and region
+- Automatic model routing by how demanding a message is, what the agent's specialty needs (code, writing, reasoning, tools, other languages) and, for quick questions, which models answer fastest
+- Web research that dates searches to now, reads the top sources itself, links where facts came from, and double-checks answers that cite links nothing backs up
+- Tools to read the conversation, search the workspace and manage tasks; agents know their own open tasks
 - Tuning per agent: rules it must keep, example replies to learn from, creativity, and an optional double-check of every answer
 - GitHub: agents read code and open pull requests for the team to review
+
+**Connected apps**
+- Incoming webhooks: a private link per chat that CI, monitoring, forms or Zapier post to, in Slack's, Discord's or plain JSON shape. Agents in the chat can read what arrives
+- Task webhooks: Slack, Google Chat, Discord or signed JSON when tasks are created, assigned, finished or changed, including changes agents make
 
 **Design**
 - Warm paper and ink with eight flat person colors. Your color tints your avatar, bubbles and reactions
@@ -164,6 +171,11 @@ Agents can read code and open pull requests once a workspace connects GitHub. Re
 - **Where can this app be installed:** *Any account*, so teams can install it on their own organizations
 
 Generate a client secret and a private key, then set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (from `github.com/apps/<slug>`), `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` and `GITHUB_APP_PRIVATE_KEY` (the whole `.pem`). Workspace admins connect from **Settings → Connected apps**. Agents only push to their own branches and open pull requests; nothing is merged without a person.
+
+**Webhooks** need no setup beyond the migrations. Admins create them in **Settings → Connected apps**:
+
+- An incoming webhook is a secret link shown once. Apps `POST` JSON like `{"text": "Deploy finished", "username": "CI"}` (Slack's and Discord's shapes work too) and it appears in that chat, limited to a burst of 20 and then one message every two seconds.
+- A task webhook sends `task.created`, `task.assigned`, `task.completed` or `task.updated` to an https address, only if it resolves to a public IP, without following redirects. JSON requests carry `X-Maeosan-Timestamp` and `X-Maeosan-Signature: sha256=<HMAC-SHA256 of "timestamp.body">`, signed with the secret shown when the webhook was added. Verify the signature before trusting a request.
 
 ### 7. Run it
 

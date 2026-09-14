@@ -14,7 +14,7 @@ import type { CreditAccount, UsageBucket, UsageSummary } from "@/types/domain";
 import { fetchRecentRuns, fetchUsageSummary, type RecentRun } from "../api";
 import { CREDITS_PER_USD, formatCredits, typicalReplyCredits } from "../credits";
 import { fillDays } from "../lib/usage";
-import { AI_MODELS, findModel, PROVIDERS, TIER_LABELS } from "../models";
+import { AI_MODELS, findModel, TIER_LABELS } from "../models";
 import { AgentAvatar } from "./agent-avatar";
 import { creditTotal, LOW_CREDIT_SHARE } from "./credits-meter";
 import { UsageChart, UsageTable } from "./usage-chart";
@@ -355,7 +355,7 @@ function ModelsTable() {
               <td className="px-1 py-2.5">
                 <span className="block text-ink">{model.label}</span>
                 <span className="block text-[12px] text-ink-3">
-                  {PROVIDERS[model.provider].label} · {model.summary}
+                  {model.maker} · {model.summary}
                 </span>
               </td>
               <td className="px-2 py-2.5 text-ink-2">{TIER_LABELS[model.tier]}</td>

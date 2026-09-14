@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Database } from "@/types/database";
+import type { Database, Json } from "@/types/database";
 
 export type AdminClient = SupabaseClient<Database>;
 
@@ -14,7 +14,11 @@ export interface DirectoryPerson {
   status: string | null;
 }
 
-/** Names for everyone (and every agent) a run might mention, loaded once per run. */
+/** Several agents answering one message, or a quick back-and-forth, share one lookup. */
+const DIRECTORY_CACHE_MS = 20_000;
+const directoryCache = new Map<string, { loadedAt: number; directory: Promise<NameDirectory> }>();
+
+/** Names for everyone (and every agent) a run might mention. */
 export class NameDirectory {
   private constructor(
     readonly workspaceName: string,
@@ -22,7 +26,16 @@ export class NameDirectory {
     readonly agents: Map<string, { name: string; handle: string }>,
   ) {}
 
-  static async load(admin: AdminClient, workspaceId: string): Promise<NameDirectory> {
+  static load(admin: AdminClient, workspaceId: string): Promise<NameDirectory> {
+    const cached = directoryCache.get(workspaceId);
+    if (cached && Date.now() - cached.loadedAt < DIRECTORY_CACHE_MS) return cached.directory;
+    const directory = NameDirectory.fetch(admin, workspaceId);
+    directoryCache.set(workspaceId, { loadedAt: Date.now(), directory });
+    directory.catch(() => directoryCache.delete(workspaceId));
+    return directory;
+  }
+
+  private static async fetch(admin: AdminClient, workspaceId: string): Promise<NameDirectory> {
     const [workspaceResult, membersResult, agentsResult] = await Promise.all([
       admin.from("workspaces").select("name").eq("id", workspaceId).single(),
       admin.from("workspace_members").select("user_id, role").eq("workspace_id", workspaceId),
@@ -64,10 +77,15 @@ export class NameDirectory {
     return (userId && this.people.get(userId)?.name) || "A former member";
   }
 
-  authorName(message: { sender_id: string | null; agent_id: string | null }) {
+  authorName(message: { sender_id: string | null; agent_id: string | null; meta?: Json }) {
     if (message.agent_id) {
       const agent = this.agents.get(message.agent_id);
       return agent ? `${agent.name} (AI agent @${agent.handle})` : "An AI agent";
+    }
+    const meta = message.meta;
+    if (!message.sender_id && meta && typeof meta === "object" && !Array.isArray(meta) && meta.source === "webhook") {
+      const name = typeof meta.name === "string" && meta.name.trim() ? meta.name.trim() : "An app";
+      return `${name} (app, posted by webhook)`;
     }
     return this.personName(message.sender_id);
   }

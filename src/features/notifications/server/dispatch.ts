@@ -35,6 +35,13 @@ function senderName(profile: SenderProfile) {
   return profile?.display_name || profile?.full_name || profile?.email.split("@")[0] || "Someone";
 }
 
+/** The app's name on a message an incoming webhook posted. */
+function appName(meta: unknown) {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const record = meta as Record<string, unknown>;
+  return record.source === "webhook" && typeof record.name === "string" && record.name.trim() ? record.name.trim() : null;
+}
+
 function summarize(body: string, attachments: unknown) {
   const text = body.replace(/\s+/g, " ").trim();
   if (text) return text.length > 140 ? `${text.slice(0, 139)}…` : text;
@@ -60,7 +67,7 @@ export async function dispatchMessagePush(messageId: string): Promise<DispatchRe
 
   const { data: message, error: messageError } = await admin
     .from("messages")
-    .select("id, conversation_id, sender_id, kind, body, attachments, deleted_at, created_at")
+    .select("id, conversation_id, sender_id, kind, body, attachments, meta, deleted_at, created_at")
     .eq("id", messageId)
     .maybeSingle();
   if (messageError) throw messageError;
@@ -97,7 +104,7 @@ export async function dispatchMessagePush(messageId: string): Promise<DispatchRe
     return { recipients: recipients.length, delivered: 0, removed: 0, skipped: "no-subscriptions" };
   }
 
-  const from = senderName(senderResult.data);
+  const from = (!message.sender_id ? appName(message.meta) : null) ?? senderName(senderResult.data);
   const text = summarize(message.body, message.attachments);
   const isGroup = conversation.kind === "group";
   const payload = JSON.stringify({

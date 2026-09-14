@@ -52,7 +52,7 @@ const SETTINGS: Record<CompatibleProvider, Settings> = {
   bedrock: {
     label: "Amazon Bedrock",
     // The bedrock-mantle endpoint's OpenAI-compatible API, with a Bedrock API key as the bearer token.
-    baseURL: () => process.env.BEDROCK_OPENAI_BASE_URL?.trim() || `https://bedrock-mantle.${aiEnv.bedrockRegion}.api.aws/v1`,
+    baseURL: () => aiEnv.bedrockMantleUrl,
     apiKey: () => aiEnv.bedrockKey,
     maxTokensField: "max_tokens",
     jsonMode: false,
@@ -245,9 +245,13 @@ function translateError(provider: CompatibleProvider, model: AiModel, error: unk
   throw error;
 }
 
+/** A model that doesn't take a reasoning effort says so with a 400 that names it. */
+const effortRejected = (error: unknown) => error instanceof OpenAI.BadRequestError && /reasoning/i.test(error.message);
+
 class CompatibleSession implements ProviderSession {
   private readonly messages: OpenAI.Chat.ChatCompletionMessageParam[];
   private readonly tools: OpenAI.Chat.ChatCompletionFunctionTool[];
+  private effortRefused = false;
 
   constructor(
     private readonly provider: CompatibleProvider,
@@ -264,7 +268,9 @@ class CompatibleSession implements ProviderSession {
   }
 
   async step({ signal, onText }: StepHooks): Promise<StepResult> {
-    const { model, maxOutputTokens, temperature } = this.options;
+    const { model, maxOutputTokens, temperature, effort } = this.options;
+    // Reasoning models think before the first word; a low effort for quick questions answers much sooner.
+    const reasoningEffort = model.reasoningEffort && effort && !this.effortRefused ? effort : undefined;
     try {
       const stream = await getClient(this.provider).chat.completions.create(
         {
@@ -275,6 +281,7 @@ class CompatibleSession implements ProviderSession {
           ...(this.tools.length > 0 ? { tools: this.tools } : {}),
           ...maxTokens(this.provider, model, maxOutputTokens),
           ...(model.supportsTemperature && temperature !== undefined ? { temperature } : {}),
+          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         },
         { signal },
       );
@@ -336,6 +343,10 @@ class CompatibleSession implements ProviderSession {
 
       return { text, toolCalls, usage: usageOf(usage), outcome: outcomeOf(finishReason, toolCalls.length) };
     } catch (error) {
+      if (reasoningEffort && effortRejected(error)) {
+        this.effortRefused = true;
+        return this.step({ signal, onText });
+      }
       translateError(this.provider, model, error);
     }
   }
@@ -351,9 +362,9 @@ function compatibleProvider(provider: CompatibleProvider): AiProviderClient {
   return {
     createSession: (options) => new CompatibleSession(provider, options),
 
-    async generateObject<T>({ model, system, prompt, jsonSchema, parse, maxOutputTokens, signal }: StructuredRequest<T>) {
-      try {
-        const response = await getClient(provider).chat.completions.create(
+    async generateObject<T>({ model, system, prompt, jsonSchema, parse, maxOutputTokens, signal, effort }: StructuredRequest<T>) {
+      const request = (reasoningEffort: typeof effort) =>
+        getClient(provider).chat.completions.create(
           {
             model: model.id,
             messages: [
@@ -365,9 +376,16 @@ function compatibleProvider(provider: CompatibleProvider): AiProviderClient {
             ],
             ...(SETTINGS[provider].jsonMode ? { response_format: { type: "json_object" as const } } : {}),
             ...maxTokens(provider, model, maxOutputTokens),
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           },
           { signal },
         );
+      try {
+        const wanted = model.reasoningEffort ? effort : undefined;
+        const response = await request(wanted).catch((error: unknown) => {
+          if (wanted && effortRejected(error)) return request(undefined);
+          throw error;
+        });
         const choice = response.choices[0];
         if (choice?.finish_reason === "content_filter") {
           throw new ProviderError("refused", provider, "The model declined to design this agent.");

@@ -2,7 +2,7 @@ import "server-only";
 
 import { describeBedrockKey, onBedrock, readClaudeSettings, type BedrockEndpoint, type ClaudeHost } from "../claude-hosts";
 import { AI_MODELS, type AiModel, type AiProvider } from "../models";
-import { isModelRefused } from "./availability";
+import { isModelRefused, isUnlistedOnBedrock } from "./availability";
 
 const read = (name: string) => process.env[name]?.trim() || null;
 const claude = () => readClaudeSettings(process.env);
@@ -18,6 +18,10 @@ export const aiEnv = {
   },
   get bedrockRegion() {
     return claude().bedrockRegion;
+  },
+  /** The bedrock-mantle endpoint's OpenAI-compatible API, where Bedrock's open models run. */
+  get bedrockMantleUrl() {
+    return (read("BEDROCK_OPENAI_BASE_URL") ?? `https://bedrock-mantle.${claude().bedrockRegion}.api.aws/v1`).replace(/\/+$/, "");
   },
   /** When a short-term Bedrock key stops working; null for long-term keys. */
   get bedrockKeyExpiresAt(): Date | null {
@@ -62,14 +66,15 @@ export function isProviderConfigured(provider: AiProvider): boolean {
 /**
  * Models this server can run right now, in preference order, as they are
  * served here: Claude on Bedrock comes without web search and at Bedrock's
- * price, and models the account was recently refused are left out while any
- * others remain.
+ * price, open models Bedrock doesn't list for this key and region are left
+ * out, and so are models the account was recently refused while any others
+ * remain.
  */
 export function configuredModels(): AiModel[] {
   const claudeOnBedrock = aiEnv.claudeHost === "bedrock";
-  const served = AI_MODELS.filter((model) => isProviderConfigured(model.provider)).map((model) =>
-    claudeOnBedrock && model.provider === "anthropic" ? onBedrock(model) : model,
-  );
+  const served = AI_MODELS.filter(
+    (model) => isProviderConfigured(model.provider) && !(model.provider === "bedrock" && isUnlistedOnBedrock(model.id)),
+  ).map((model) => (claudeOnBedrock && model.provider === "anthropic" ? onBedrock(model) : model));
   const usable = served.filter((model) => !isModelRefused(model.id));
   return usable.length > 0 ? usable : served;
 }

@@ -1,8 +1,10 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { validTimeZone } from "@/features/ai/lib/time";
 import { extractMentionHandles } from "@/features/ai/mentions";
 import { routeModel } from "@/features/ai/router";
+import { refreshBedrockCatalog } from "@/features/ai/server/bedrock-catalog";
 import { configuredModels } from "@/features/ai/server/env";
 import { runAgentReply } from "@/features/ai/server/run-reply";
 import { toResponseStyle, toSpecialty } from "@/features/ai/specialties";
@@ -20,6 +22,8 @@ const bodySchema = z.object({
   messageId: z.guid(),
   /** A model picked for this message, or "auto". */
   model: z.string().max(80).nullish(),
+  /** The sender's time zone, so "today" and message times are theirs. */
+  timeZone: z.string().max(64).nullish(),
 });
 
 const log = logger.child({ module: "api-ai-runs" });
@@ -39,13 +43,26 @@ function startError(code: string | undefined) {
 }
 
 /**
+ * Called while someone types to an agent, so the reply that follows starts on
+ * a warm server that already knows which models it can call. Reads nothing
+ * private and does nothing else.
+ */
+export async function GET() {
+  await refreshBedrockCatalog(2_500);
+  return new NextResponse(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+}
+
+/**
  * Starts agent replies for a message the signed-in person just sent. Which
  * agents answer, which model each one uses and whether the person's credits
  * allow it are all decided here and in the database, never by the browser.
+ * Every agent starts at once, and housekeeping waits until after the response.
  */
 export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return reply(400, { error: "That request wasn't valid.", code: "invalid" });
+  // Bedrock's list of callable models is read, when due, while the message loads.
+  const catalog = refreshBedrockCatalog();
 
   const supabase = await createSupabaseServerClient();
   const { data: auth } = await supabase.auth.getUser();
@@ -74,17 +91,23 @@ export async function POST(request: Request) {
   const repliedAgentId = repliedTo?.agent_id ?? null;
   if (!conversation.agent_id && !repliedAgentId && handles.length === 0) return reply(200, { runs: [] });
 
+  await catalog;
+  const available = configuredModels();
+  if (!serverEnv.hasServiceRoleKey || available.length === 0) {
+    log.error("AI is not configured: set SUPABASE_SERVICE_ROLE_KEY and at least one provider key");
+    return unavailable();
+  }
+
   // Ids come from the database and handles only ever contain [a-z0-9-], so they are safe inside the filter.
   const clauses = [
     ...[conversation.agent_id, repliedAgentId].filter((id): id is string => Boolean(id)).map((id) => `id.eq.${id}`),
     ...(handles.length > 0 ? [`handle.in.(${handles.join(",")})`] : []),
   ];
-  const { data: found, error: agentsError } = await supabase
-    .from("ai_agents")
-    .select("*")
-    .eq("workspace_id", conversation.workspace_id)
-    .is("archived_at", null)
-    .or(clauses.join(","));
+  const admin = createSupabaseAdminClient();
+  const [{ data: found, error: agentsError }, { data: wallet }] = await Promise.all([
+    supabase.from("ai_agents").select("*").eq("workspace_id", conversation.workspace_id).is("archived_at", null).or(clauses.join(",")),
+    admin.from("ai_wallets").select("balance").eq("user_id", user.id).maybeSingle(),
+  ]);
   if (agentsError) {
     log.error("agent lookup failed", { error: agentsError });
     return startError(undefined);
@@ -101,24 +124,16 @@ export async function POST(request: Request) {
   const agents = ordered.slice(0, MAX_AGENTS_PER_MESSAGE);
   if (agents.length === 0) return reply(200, { runs: [] });
 
-  const available = configuredModels();
-  if (!serverEnv.hasServiceRoleKey || available.length === 0) {
-    log.error("AI is not configured: set SUPABASE_SERVICE_ROLE_KEY and at least one provider key");
-    return unavailable();
-  }
-
-  const admin = createSupabaseAdminClient();
-  const [{ error: staleError }, { data: wallet }] = await Promise.all([
-    admin.rpc("ai_fail_stale_runs", { p_workspace_id: conversation.workspace_id }),
-    admin.from("ai_wallets").select("balance").eq("user_id", user.id).maybeSingle(),
-  ]);
-  if (staleError) log.warn("stale run cleanup failed", { error: staleError });
   if (!wallet || wallet.balance < 1) return startError("P0402");
 
-  const runs: Array<{ runId: string; messageId: string; agentId: string; model: string; created: boolean }> = [];
-  const work: Array<Parameters<typeof runAgentReply>[0]> = [];
+  // Runs a crashed server left behind hand their held credits back, without holding this request up.
+  after(async () => {
+    const { error } = await admin.rpc("ai_fail_stale_runs", { p_workspace_id: conversation.workspace_id });
+    if (error) log.warn("stale run cleanup failed", { error });
+  });
 
-  for (const agent of agents) {
+  const timeZone = validTimeZone(parsed.data.timeZone);
+  const planned = agents.flatMap((agent) => {
     const decision = routeModel({
       text: message.body,
       specialty: toSpecialty(agent.specialty),
@@ -130,22 +145,32 @@ export async function POST(request: Request) {
       balance: wallet.balance,
       available,
     });
-    if (!decision) continue;
+    return decision ? [{ agent, decision }] : [];
+  });
 
-    const { data, error } = await admin.rpc("ai_start_reply_run", {
-      p_user_id: user.id,
-      p_trigger_message_id: message.id,
-      p_agent_id: agent.id,
-      p_model: decision.model.id,
-      // In shared chats the reply quotes the question; an agent's own room doesn't need it.
-      p_quote: !conversation.agent_id,
-      p_route: { mode: decision.mode, tier: decision.tier, complexity: decision.complexity, reason: decision.reason },
-    });
-    const started = data?.[0];
+  const attempts = await Promise.all(
+    planned.map(async ({ agent, decision }) => {
+      const { data, error } = await admin.rpc("ai_start_reply_run", {
+        p_user_id: user.id,
+        p_trigger_message_id: message.id,
+        p_agent_id: agent.id,
+        p_model: decision.model.id,
+        // In shared chats the reply quotes the question; an agent's own room doesn't need it.
+        p_quote: !conversation.agent_id,
+        p_route: { mode: decision.mode, tier: decision.tier, complexity: decision.complexity, reason: decision.reason },
+      });
+      return { agent, decision, started: data?.[0], error };
+    }),
+  );
 
+  const runs: Array<{ runId: string; messageId: string; agentId: string; model: string; created: boolean }> = [];
+  const work: Array<Parameters<typeof runAgentReply>[0]> = [];
+  let refusal: string | undefined;
+
+  for (const { agent, decision, started, error } of attempts) {
     if (error || !started) {
       log.warn("agent run refused", { agentId: agent.id, error });
-      if (runs.length === 0 && (error?.code === "P0402" || error?.code === "P0429")) return startError(error.code);
+      if (error?.code === "P0402" || error?.code === "P0429") refusal ??= error.code;
       continue;
     }
 
@@ -166,11 +191,16 @@ export async function POST(request: Request) {
         userId: user.id,
         agent,
         model: decision.model,
+        complexity: decision.complexity,
+        timeZone,
+        coworkers: agents.filter((other) => other.id !== agent.id).map((other) => ({ name: other.name, handle: other.handle })),
+        triggerBody: message.body,
+        triggerReplyToId: message.reply_to_id,
       });
     }
   }
 
-  if (runs.length === 0) return startError(undefined);
+  if (runs.length === 0) return startError(refusal);
 
   if (work.length > 0) {
     after(async () => {

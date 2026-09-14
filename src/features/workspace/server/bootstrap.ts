@@ -2,6 +2,7 @@ import "server-only";
 
 import { notFound, redirect } from "next/navigation";
 
+import { refreshBedrockCatalog } from "@/features/ai/server/bedrock-catalog";
 import { configuredModels } from "@/features/ai/server/env";
 import { webSearchAvailable } from "@/features/ai/server/web";
 import { githubApp } from "@/features/integrations/server/github";
@@ -14,6 +15,9 @@ import { getMyPendingInvitations, getMyWorkspaces, getOwnProfile, getServerSupab
 import type { AiBootstrap, IntegrationsBootstrap, TasksBootstrap, WorkspaceBootstrap } from "../store/workspace-store";
 
 type ServerSupabase = Awaited<ReturnType<typeof getServerSupabase>>;
+
+/** How long the first page load waits for Bedrock's model list before showing every model. */
+const CATALOG_WAIT_MS = 600;
 
 /** Tasks stay hidden until the tasks migration is applied; everything else keeps working. */
 async function loadTasks(supabase: ServerSupabase, workspaceId: string): Promise<TasksBootstrap> {
@@ -42,9 +46,6 @@ async function loadIntegrations(supabase: ServerSupabase, workspaceId: string): 
 
 /** Chat keeps working on a database that hasn't had the AI migrations yet; agents just stay hidden. */
 async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: string): Promise<AiBootstrap> {
-  const available = configuredModels();
-  const models = available.map((model) => model.id);
-  const webSearch = webSearchAvailable() || available.some((model) => model.webSearch !== null);
   const [agents, credits] = await Promise.all([
     supabase.from("ai_agents").select("*").eq("workspace_id", workspaceId).order("created_at"),
     supabase
@@ -52,7 +53,11 @@ async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: str
       .select("balance, reserved, lifetime_granted, lifetime_used")
       .eq("user_id", userId)
       .maybeSingle(),
+    refreshBedrockCatalog(CATALOG_WAIT_MS),
   ]);
+  const available = configuredModels();
+  const models = available.map((model) => model.id);
+  const webSearch = webSearchAvailable() || available.some((model) => model.webSearch !== null);
 
   const error = agents.error ?? credits.error;
   if (error) {

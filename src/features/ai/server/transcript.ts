@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Json } from "@/types/database";
 
+import { localStamp } from "../lib/time";
 import type { NameDirectory } from "./directory";
 
 export interface TranscriptMessage {
@@ -21,7 +22,7 @@ export const TRANSCRIPT_COLUMNS = "id, sender_id, agent_id, kind, body, attachme
 
 const MAX_MESSAGE_CHARS = 2000;
 
-const stamp = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+const stamp = (iso: string, timeZone: string) => (timeZone === "UTC" ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : localStamp(iso, timeZone));
 
 function attachmentNames(value: Json) {
   if (!Array.isArray(value)) return [];
@@ -45,20 +46,20 @@ function isUnfinishedAgentReply(message: TranscriptMessage) {
 /** Text messages worth reading: no system events, no replies still being written. */
 export const isTranscriptWorthy = (message: TranscriptMessage) => message.kind === "text" && !isUnfinishedAgentReply(message);
 
-/** One line per message, oldest first, skipping noise a model doesn't need. */
-export function formatTranscript(messages: TranscriptMessage[], directory: NameDirectory): string[] {
+/** One line per message, oldest first, skipping noise a model doesn't need. Times are in the asker's time zone. */
+export function formatTranscript(messages: TranscriptMessage[], directory: NameDirectory, timeZone = "UTC"): string[] {
   const lines: string[] = [];
   for (const message of messages) {
     if (!isTranscriptWorthy(message)) continue;
     const author = directory.authorName(message);
     if (message.deleted_at) {
-      lines.push(`[${stamp(message.created_at)}] ${author}: (deleted a message)`);
+      lines.push(`[${stamp(message.created_at, timeZone)}] ${author}: (deleted a message)`);
       continue;
     }
     const files = attachmentNames(message.attachments);
     const body = message.body.length > MAX_MESSAGE_CHARS ? `${message.body.slice(0, MAX_MESSAGE_CHARS)}…` : message.body;
     const attached = files.length ? ` [attached: ${files.join(", ")}]` : "";
-    lines.push(`[${stamp(message.created_at)}] ${author}: ${body}${attached}`.trim());
+    lines.push(`[${stamp(message.created_at, timeZone)}] ${author}: ${body}${attached}`.trim());
   }
   return lines;
 }

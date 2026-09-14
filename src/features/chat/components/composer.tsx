@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { IconButton } from "@/components/ui/icon-button";
 import { IconArrowUp, IconClose, IconPaperclip, IconReply, IconSpark, IconTasks } from "@/components/ui/icons";
+import { warmAgentReplies } from "@/features/ai/api";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { AgentPanel } from "@/features/ai/components/agent-panel";
 import { matchAgents, MentionMenu } from "@/features/ai/components/mention-menu";
@@ -106,6 +107,12 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
         available,
       })
     : null;
+
+  // Once the message would wake an agent, get the reply server ready while the person finishes typing.
+  const wakesAgents = woken.length > 0;
+  useEffect(() => {
+    if (wakesAgents) warmAgentReplies();
+  }, [wakesAgents]);
 
   useLayoutEffect(() => {
     const element = textareaRef.current;
@@ -213,12 +220,18 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
       if (uploading && hasContent) toast("Still uploading. It’ll be ready in a moment.");
       return;
     }
-    void actions.send({
-      body: text.trim(),
-      attachments: readyAttachments,
-      replyTo,
-      agentModel: woken.length > 0 && replyModel !== AUTO_MODEL ? replyModel : null,
-    });
+    const wokenIds = woken.map((agent) => agent.id);
+    void actions
+      .send({
+        body: text.trim(),
+        attachments: readyAttachments,
+        replyTo,
+        agentModel: woken.length > 0 && replyModel !== AUTO_MODEL ? replyModel : null,
+      })
+      .then((messageId) => {
+        // Show who is about to reply straight away, before the server has even started them.
+        if (wokenIds.length > 0) store.getState().markRepliesPending(conversationId, messageId, wokenIds);
+      });
     setText("");
     setCaret(0);
     setDismissedMentionAt(null);

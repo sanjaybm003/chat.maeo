@@ -50,7 +50,7 @@ import {
 } from "../agent-spec";
 import { AiRequestError, draftAgent, openAgentConversation } from "../api";
 import { creditsForUsage, formatCredits, typicalReplyCredits } from "../credits";
-import { AI_MODELS, findModel, pickArchitectModel, PROVIDERS, recommendModel, TIER_LABELS, type AiModel, type ModelTier } from "../models";
+import { AI_MODELS, findModel, pickArchitectModel, recommendModel, STRENGTH_LABELS, TIER_LABELS, type AiModel, type ModelTier } from "../models";
 import { modelForTier } from "../router";
 import { RESPONSE_STYLE_OPTIONS, SPECIALTY_LIST, SPECIALTY_PROFILES } from "../specialties";
 import { AgentAvatar, AgentGlyphMark, AgentTag, GLYPH_LABELS } from "./agent-avatar";
@@ -954,7 +954,7 @@ function AutoPreview({ specialty, available }: { specialty: Specialty; available
             </span>
             <span className="w-[118px] shrink-0 text-[13.5px] text-ink">{TIER_USES[tier]}</span>
             <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
-              {model ? `${model.label} · ${PROVIDERS[model.provider].label}` : "Not available"}
+              {model ? `${model.label} · ${model.maker}` : "Not available"}
             </span>
             {model ? <span className="shrink-0 font-mono text-[11px] text-ink-3">≈ {typicalReplyCredits(model)} credits</span> : null}
           </div>
@@ -993,11 +993,12 @@ function ModelPicker({ value, available, onChange }: { value: string; available:
                   >
                     <span className="flex w-full items-baseline justify-between gap-2">
                       <span className="text-[14px] font-semibold text-ink">{model.label}</span>
-                      <span className="shrink-0 font-mono text-[10.5px] text-ink-3">{PROVIDERS[model.provider].label}</span>
+                      <span className="shrink-0 font-mono text-[10.5px] text-ink-3">{model.maker}</span>
                     </span>
                     <span className="text-[12.5px] leading-snug text-ink-3">{model.summary}</span>
                     <span className="mt-1 font-mono text-[11px] text-ink-2">
                       ≈ {typicalReplyCredits(model)} credits a reply{model.preview ? " · preview" : ""}
+                      {model.strengths.length > 0 ? ` · ${model.strengths.slice(0, 3).map((strength) => STRENGTH_LABELS[strength]).join(", ")}` : ""}
                     </span>
                   </button>
                 );

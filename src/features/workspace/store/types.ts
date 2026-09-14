@@ -171,7 +171,19 @@ export interface UiSlice {
   closeAgentPanel: () => void;
 }
 
+/** Agents just called on by a message sent from this device, shown until their replies appear. */
+export interface PendingReplies {
+  messageId: string;
+  agentIds: string[];
+  since: number;
+}
+
 export interface AiSlice {
+  /** conversationId → the latest message sent here that is waiting on agents. */
+  pendingReplies: Record<string, PendingReplies>;
+  markRepliesPending: (conversationId: string, messageId: string, agentIds: string[]) => void;
+  /** Clears the conversation's wait, or only the wait for that message when one is given. */
+  clearPendingReplies: (conversationId: string, messageId?: string) => void;
   aiReady: boolean;
   aiModels: string[];
   aiWebSearch: boolean;

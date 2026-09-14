@@ -80,6 +80,9 @@ export interface SystemMeta {
   agent_id?: string;
   task_id?: string;
   number?: number;
+  /** On a message an app posted through an incoming webhook; `name` is the app's. */
+  source?: "webhook";
+  webhook_id?: string;
 }
 
 export interface MessagePreview {

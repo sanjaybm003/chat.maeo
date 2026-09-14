@@ -31,3 +31,24 @@ export function isModelRefused(modelId: string, now = Date.now()) {
   refusedUntil.delete(modelId);
   return false;
 }
+
+/** How long Bedrock's list of callable models is trusted, and how soon a failed read is tried again. */
+export const BEDROCK_CATALOG_TTL_MS = 30 * 60 * 1000;
+export const BEDROCK_CATALOG_RETRY_MS = 5 * 60 * 1000;
+
+/** ids is null when the list couldn't be read or didn't look like Bedrock's: then nothing is hidden. */
+let bedrockCatalog: { ids: ReadonlySet<string> | null; checkedAt: number } | null = null;
+
+export function recordBedrockCatalog(ids: ReadonlySet<string> | null, now = Date.now()) {
+  bedrockCatalog = { ids, checkedAt: now };
+}
+
+export function bedrockCatalogFresh(now = Date.now()) {
+  if (!bedrockCatalog) return false;
+  return now - bedrockCatalog.checkedAt < (bedrockCatalog.ids ? BEDROCK_CATALOG_TTL_MS : BEDROCK_CATALOG_RETRY_MS);
+}
+
+/** A model Bedrock's own list leaves out can't be called with this key in this region, so it isn't offered. */
+export function isUnlistedOnBedrock(modelId: string) {
+  return Boolean(bedrockCatalog?.ids && !bedrockCatalog.ids.has(modelId));
+}

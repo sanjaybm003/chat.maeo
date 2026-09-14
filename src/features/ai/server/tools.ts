@@ -10,12 +10,13 @@ import type { ToolCall, ToolResult, ToolSpec } from "./providers/types";
 import { describeTaskToolCall, executeTaskTool, TASK_TOOL_NAMES, TASK_TOOL_SPECS } from "./task-tools";
 import { ToolInputError } from "./tool-errors";
 import { formatTranscript, TRANSCRIPT_COLUMNS, type TranscriptMessage } from "./transcript";
-import { formatFindings, formatPage, readWebPage, searchWeb, webSearchAvailable, WebToolError } from "./web";
+import { formatFindings, formatPage, readWebPage, searchWeb, webSearchAvailable, WebToolError, type WebDepth, type WebSource } from "./web";
 
 const log = logger.child({ module: "agent-tools" });
 
 const DEFAULT_OUTPUT_CHARS = 8000;
 const OUTPUT_CHARS: Record<string, number> = {
+  search_web: 14_000,
   read_web_page: 15_000,
   github_read_file: 26_000,
   github_list_files: 14_000,
@@ -55,7 +56,7 @@ const DIRECTORY: ToolSpec = {
 const SEARCH_WEB: ToolSpec = {
   name: "search_web",
   description:
-    "Search the web for current or outside information: news, prices, releases, documentation, public facts. Returns a short brief with numbered sources. Make the query specific, with the names and year that matter.",
+    "Search the web for current or outside information: news, prices, releases, documentation, public facts. Returns a short brief with numbered sources, and for thorough questions the relevant passages of the top sources. Make the query specific, with the names and year that matter. Search again with different words when the first results don't settle the question.",
   parameters: {
     type: "object",
     properties: { query: { type: "string", description: "A specific search, like \"Next.js 16 release date\"." } },
@@ -110,6 +111,16 @@ export interface ToolContext {
   userId: string;
   agentId: string;
   agentName: string;
+  /** The asker's time zone, for message times and due dates. */
+  timeZone: string;
+  /** The asker's date and time in words, so web searches look for what's current. */
+  today: string;
+  /** How thoroughly a web search reads its sources. */
+  webDepth: WebDepth;
+  /** Every source web searches returned during this reply, for its source line. */
+  webSources: WebSource[];
+  /** Work that carries on after a tool answers, like telling connected apps about a task; the run waits for it before ending. */
+  background: Promise<unknown>[];
   /** Moves back each time read_earlier_messages pages further. */
   oldestLoadedAt: string | null;
   github: GithubAccess | null;
@@ -172,7 +183,7 @@ async function readEarlierMessages(call: ToolCall, context: ToolContext): Promis
   if (messages.length === 0) return "There are no earlier messages in this conversation.";
   context.oldestLoadedAt = messages[0].created_at;
 
-  const lines = formatTranscript(messages, context.directory);
+  const lines = formatTranscript(messages, context.directory, context.timeZone);
   const more = messages.length === limit ? "\n(Even older messages exist.)" : "";
   return `${lines.join("\n")}${more}`;
 }
@@ -267,8 +278,9 @@ async function webSearch(call: ToolCall, context: ToolContext): Promise<string> 
   }
   let credits = 0;
   try {
-    const findings = await searchWeb(query, context.signal);
+    const findings = await searchWeb(query, context.signal, { today: context.today, depth: context.webDepth });
     credits = findings.credits;
+    context.webSources.push(...findings.sources);
     return formatFindings(query, findings);
   } finally {
     await context.billing.settle(credits);

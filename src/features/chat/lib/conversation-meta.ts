@@ -94,6 +94,11 @@ function agentPreviewContent(preview: MessagePreview) {
   }
 }
 
+/** The app's name on a message an incoming webhook posted, or null for everything else. */
+export function appSenderName(message: { senderId: string | null; agentId: string | null; meta: MessagePreview["meta"] }) {
+  return !message.senderId && !message.agentId && message.meta.source === "webhook" ? message.meta.name?.trim() || "App" : null;
+}
+
 export function previewLine(conversation: Conversation, members: Members, meId: string, agents?: Agents) {
   const preview: MessagePreview | null = conversation.lastMessage;
   if (!preview) {

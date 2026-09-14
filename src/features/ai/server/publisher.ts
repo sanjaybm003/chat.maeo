@@ -24,6 +24,7 @@ export class StreamPublisher {
   private closed = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private chain: Promise<void> = Promise.resolve();
+  private lastFlushAt = 0;
 
   constructor(
     private readonly admin: AdminClient,
@@ -49,15 +50,18 @@ export class StreamPublisher {
   private schedule() {
     this.dirty = true;
     if (this.timer || this.closed) return;
+    // The first words and steps go out at once; after that, at most one snapshot per interval.
+    const wait = Math.max(0, FLUSH_INTERVAL_MS - (Date.now() - this.lastFlushAt));
     this.timer = setTimeout(() => {
       this.timer = undefined;
       this.flush();
-    }, FLUSH_INTERVAL_MS);
+    }, wait);
   }
 
   private flush() {
     if (!this.dirty || this.closed) return;
     this.dirty = false;
+    this.lastFlushAt = Date.now();
     this.seq += 1;
     const payload = {
       run_id: this.ids.runId,

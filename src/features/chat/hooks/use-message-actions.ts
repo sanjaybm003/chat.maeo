@@ -48,7 +48,8 @@ export function useMessageActions(conversationId: string) {
     });
 
     return {
-      async send({ body, attachments, replyTo, agentModel }: SendInput) {
+      /** Resolves with the new message's id as soon as it's queued. */
+      async send({ body, attachments, replyTo, agentModel }: SendInput): Promise<string> {
         const entry: NewOutboxEntry = {
           id: crypto.randomUUID(),
           workspaceId: state().workspace.id,
@@ -72,6 +73,7 @@ export function useMessageActions(conversationId: string) {
         };
         state().receiveMessage(outboxEntryToMessage({ ...entry, attempts: 0, nextAttemptAt: 0, state: "pending", lastError: null }));
         outbox.enqueue(entry);
+        return entry.id;
       },
 
       async retry(message: Message) {

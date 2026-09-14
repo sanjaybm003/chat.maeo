@@ -199,6 +199,33 @@ describe("open models on Amazon Bedrock", () => {
     expect(deltas.join("")).toBe("Hi Sam");
   });
 
+  it("asks reasoning models for a quick answer, and asks again without it when a model doesn't take one", async () => {
+    let calls = 0;
+    respond = (_request, response) => {
+      calls += 1;
+      if (calls === 1) return json(response, 400, { error: { message: "Unsupported parameter: reasoning_effort", type: "invalid_request_error" } });
+      textReply(response, "openai.gpt-oss-120b", "Quick answer");
+    };
+    const { provider } = await load();
+
+    const result = await provider
+      .createSession({ model: gptOss, system: "s", userMessage: "u", tools: [], webSearch: false, maxOutputTokens: 500, effort: "low" })
+      .step({ signal: new AbortController().signal, onText: () => undefined });
+
+    expect(result.text).toBe("Quick answer");
+    expect(seen[0].body).toMatchObject({ reasoning_effort: "low" });
+    expect(seen[1].body).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("never sends a reasoning effort to models that don't reason that way", async () => {
+    respond = (_request, response) => textReply(response, "deepseek.v3.2", "Done");
+    const { provider } = await load();
+    await provider
+      .createSession({ model: deepseek, system: "s", userMessage: "u", tools: [], webSearch: false, maxOutputTokens: 500, effort: "high" })
+      .step({ signal: new AbortController().signal, onText: () => undefined });
+    expect(seen[0].body).not.toHaveProperty("reasoning_effort");
+  });
+
   it("marks a model the account can't use so routing steers around it", async () => {
     respond = (_request, response) =>
       json(response, 403, { error: { message: "deepseek.v3.2 is not available for this account", type: "permission_error" } });
