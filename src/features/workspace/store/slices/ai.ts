@@ -4,6 +4,7 @@ import type { AiSlice, SliceCreator } from "../types";
 export const createAiSlice: SliceCreator<AiSlice> = (set, _get, bootstrap) => ({
   aiReady: bootstrap.ai.ready,
   aiModels: bootstrap.ai.models,
+  aiWebSearch: bootstrap.ai.webSearch,
   agents: indexBy(bootstrap.ai.agents),
   credits: bootstrap.ai.credits,
   agentStreams: {},

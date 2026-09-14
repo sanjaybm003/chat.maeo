@@ -14,7 +14,9 @@ type ServerSupabase = Awaited<ReturnType<typeof getServerSupabase>>;
 
 /** Chat keeps working on a database that hasn't had the AI migrations yet; agents just stay hidden. */
 async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: string): Promise<AiBootstrap> {
-  const models = configuredModels().map((model) => model.id);
+  const available = configuredModels();
+  const models = available.map((model) => model.id);
+  const webSearch = available.some((model) => model.webSearch !== null);
   const [agents, credits] = await Promise.all([
     supabase.from("ai_agents").select("*").eq("workspace_id", workspaceId).order("created_at"),
     supabase
@@ -27,9 +29,9 @@ async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: str
   const error = agents.error ?? credits.error;
   if (error) {
     logger.warn("AI data unavailable; apply the migrations in supabase/migrations up to 20260916000100", { error });
-    return { ready: false, models, agents: [], credits: null };
+    return { ready: false, models, webSearch, agents: [], credits: null };
   }
-  return { ready: true, models, agents: (agents.data ?? []).map(mapAgent), credits: mapCreditAccount(credits.data) };
+  return { ready: true, models, webSearch, agents: (agents.data ?? []).map(mapAgent), credits: mapCreditAccount(credits.data) };
 }
 
 /**

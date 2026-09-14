@@ -26,6 +26,7 @@ export const createDirectorySlice: SliceCreator<DirectorySlice> = (set, _get, bo
         pendingInvitations: next.pendingInvitations,
         aiReady: next.ai.ready,
         aiModels: next.ai.models,
+        aiWebSearch: next.ai.webSearch,
         agents: indexBy(next.ai.agents),
         credits: next.ai.credits ?? state.credits,
       };

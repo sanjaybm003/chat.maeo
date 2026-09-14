@@ -142,6 +142,7 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
   const myRole = useWorkspace((state) => state.myRole);
   const aiReady = useWorkspace((state) => state.aiReady);
   const aiModels = useWorkspace((state) => state.aiModels);
+  const aiWebSearch = useWorkspace((state) => state.aiWebSearch);
   const existing = useWorkspace((state) => (agentId ? state.agents[agentId] : undefined));
 
   const available = useMemo(() => AI_MODELS.filter((model) => aiModels.includes(model.id)), [aiModels]);
@@ -610,14 +611,18 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
             <BuilderSection index={6} title="Tools" description="What it may look at while it works. Everything stays within what the people in the chat can already see.">
               <div className="divide-y divide-line overflow-hidden rounded-[20px] border border-line bg-surface">
                 {AGENT_TOOLS.map((tool) => {
-                  const unsupported = tool.id === "web" && form.modelMode === "fixed" && !model?.webSearch;
+                  const unsupported = tool.id === "web" && (!aiWebSearch || (form.modelMode === "fixed" && !model?.webSearch));
                   const checked = form.tools.includes(tool.id) && !unsupported;
                   return (
                     <label key={tool.id} className={cn("flex items-center justify-between gap-4 px-4 py-3.5", unsupported ? "opacity-55" : "cursor-pointer")}>
                       <span className="min-w-0">
                         <span className="block text-[14px] font-medium text-ink">{tool.label}</span>
                         <span className="block text-[12.5px] text-ink-3">
-                          {unsupported ? "The chosen model can’t browse. Pick a Claude model or use Auto." : tool.description}
+                          {unsupported
+                            ? aiWebSearch
+                              ? "The chosen model can’t browse. Pick a Claude model or use Auto."
+                              : "Web search isn’t available right now."
+                            : tool.description}
                         </span>
                       </span>
                       <Switch

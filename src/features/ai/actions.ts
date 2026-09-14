@@ -19,7 +19,8 @@ function validate(input: AgentInput): { ok: true; data: ParsedAgent } | { ok: fa
   }
 
   const available = configuredModels();
-  let model = findModel(parsed.data.model);
+  // The served copy knows host limits, such as no web search for Claude on Bedrock.
+  let model = available.find((item) => item.id === parsed.data.model) ?? findModel(parsed.data.model);
 
   if (parsed.data.modelMode === "fixed") {
     if (!model || !available.some((item) => item.id === model!.id)) {

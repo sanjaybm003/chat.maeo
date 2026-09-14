@@ -386,10 +386,11 @@ function Review({
 }) {
   const store = useWorkspaceStore();
   const workspace = useWorkspace((state) => state.workspace);
+  const webSearchOn = useWorkspace((state) => state.aiWebSearch);
   const { draft } = stage;
   const [name, setName] = useState(draft.name);
   const [handle, setHandle] = useState(draft.handle);
-  const [tools, setTools] = useState<AgentToolId[]>(draft.tools);
+  const [tools, setTools] = useState<AgentToolId[]>(() => (webSearchOn ? draft.tools : draft.tools.filter((tool) => tool !== "web")));
   const [model, setModel] = useState(AUTO_MODEL);
   const [addToChat, setAddToChat] = useState(!inRoom);
   const [showInstructions, setShowInstructions] = useState(false);
@@ -481,7 +482,7 @@ function Review({
           label={model === AUTO_MODEL ? "Auto model" : (findModel(model)?.label ?? model)}
           className="h-7 border border-line px-2.5 text-[12px] font-medium text-ink-2 hover:border-line-2"
         />
-        {AGENT_TOOLS.map((tool) => {
+        {AGENT_TOOLS.filter((tool) => tool.id !== "web" || webSearchOn).map((tool) => {
           const on = tools.includes(tool.id);
           return (
             <button

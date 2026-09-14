@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+import { aiEnv, configuredModels } from "@/features/ai/server/env";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import type { Database } from "@/types/database";
@@ -33,6 +34,8 @@ export async function GET() {
     version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "dev",
     uptimeSeconds: Math.round(process.uptime()),
     checks: { database: { ok: databaseOk, latencyMs: Date.now() - started } },
+    // Which connections are switched on, never the keys themselves.
+    ai: { claude: aiEnv.claudeHost, models: configuredModels().length },
   };
 
   return NextResponse.json(body, {

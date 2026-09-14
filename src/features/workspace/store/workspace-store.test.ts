@@ -71,7 +71,7 @@ function makeStore(conversations: Conversation[] = [conversation("c1")]) {
     myRole: "owner",
     workspaces: [],
     members: [],
-    ai: { ready: true, models: [], agents: [], credits: null },
+    ai: { ready: true, models: [], webSearch: false, agents: [], credits: null },
     conversations,
     pendingInvitations: [],
   });

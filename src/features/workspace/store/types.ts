@@ -21,6 +21,8 @@ export interface AiBootstrap {
   ready: boolean;
   /** Ids of the models this server has API keys for, in preference order. */
   models: string[];
+  /** Whether any available model can search the web (Claude on Bedrock can't). */
+  webSearch: boolean;
   agents: Agent[];
   credits: CreditAccount | null;
 }
@@ -152,6 +154,7 @@ export interface UiSlice {
 export interface AiSlice {
   aiReady: boolean;
   aiModels: string[];
+  aiWebSearch: boolean;
   /** Every agent this person can see, archived ones included so old replies keep their author. */
   agents: Record<string, Agent>;
   credits: CreditAccount | null;

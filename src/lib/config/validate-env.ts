@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { describeBedrockKey, isAwsRegion, readClaudeSettings } from "@/features/ai/claude-hosts";
 import { isLocalHostname } from "@/lib/origin";
 
 const url = z.url({ protocol: /^https?$/ });
@@ -77,6 +78,40 @@ export function validateEnv(env: Record<string, string | undefined> = process.en
   const pushKeys = [value.NEXT_PUBLIC_VAPID_PUBLIC_KEY, value.VAPID_PRIVATE_KEY, value.PUSH_DISPATCH_SECRET];
   if (pushKeys.some(Boolean) && !pushKeys.every(Boolean)) {
     warnings.push("Web push is partly configured: set NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and PUSH_DISPATCH_SECRET together.");
+  }
+
+  // Claude on Amazon Bedrock. Warnings only: a typo here should switch agents off, not the whole app.
+  const claude = readClaudeSettings(blanksRemoved);
+  const bedrockRegion = blanksRemoved.BEDROCK_REGION;
+  const claudeHost = blanksRemoved.CLAUDE_HOST;
+  const bedrockEndpoint = blanksRemoved.BEDROCK_ENDPOINT;
+  if (bedrockRegion && !isAwsRegion(bedrockRegion)) {
+    warnings.push(`BEDROCK_REGION "${bedrockRegion}" isn't an AWS region. Use one such as us-east-1.`);
+  }
+  if (claudeHost && claudeHost !== "anthropic" && claudeHost !== "bedrock") {
+    warnings.push("CLAUDE_HOST must be anthropic or bedrock.");
+  } else if (claudeHost === "bedrock" && !claude.bedrockKey) {
+    warnings.push("CLAUDE_HOST is bedrock but no Bedrock API key is set, so Claude models run through Anthropic or are unavailable.");
+  } else if (claudeHost === "anthropic" && !claude.anthropicKey) {
+    warnings.push("CLAUDE_HOST is anthropic but no Anthropic API key is set.");
+  }
+
+  const shortTermKey = claude.bedrockKey ? describeBedrockKey(claude.bedrockKey) : null;
+  if (shortTermKey?.expiresAt) {
+    const expired = shortTermKey.expiresAt.getTime() <= Date.now();
+    const when = shortTermKey.expiresAt.toISOString().replace(/:\d{2}\.\d{3}Z$/, "Z");
+    warnings.push(
+      `The Amazon Bedrock API key is a short-term key that ${expired ? "expired" : "expires"} at ${when}. ` +
+        "Agents stop replying once it expires; use a long-term Bedrock API key on a server.",
+    );
+  }
+  if (shortTermKey?.region && bedrockRegion && isAwsRegion(bedrockRegion) && shortTermKey.region !== bedrockRegion) {
+    warnings.push(
+      `The Bedrock API key was issued for ${shortTermKey.region} but BEDROCK_REGION is ${bedrockRegion}. Short-term keys only work in their own region.`,
+    );
+  }
+  if (bedrockEndpoint && bedrockEndpoint !== "mantle" && bedrockEndpoint !== "runtime") {
+    warnings.push("BEDROCK_ENDPOINT must be mantle or runtime; leave it unset to pick automatically.");
   }
 
   return { errors, warnings };

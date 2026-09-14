@@ -16,6 +16,7 @@
     "db:bundle": "node scripts/build-schema.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^0.33.5",
     "@anthropic-ai/sdk": "^0.125.0",
     "@google/genai": "^2.22.0",
     "@supabase/ssr": "^0.12.7",
