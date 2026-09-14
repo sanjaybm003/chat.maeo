@@ -12,9 +12,9 @@ import type { AiModel } from "../models";
 import { SPECIALTY_PROFILES, toSpecialty } from "../specialties";
 import { buildReplyContext, type AgentRow } from "./context";
 import type { AdminClient } from "./directory";
-import { AgentRunError, friendlyRunError, RunCancelledError, RunDeadlineError } from "./errors";
+import { AgentRunError, describeFailure, friendlyRunError, RunCancelledError, RunDeadlineError } from "./errors";
 import { isProviderConfigured } from "./env";
-import { providerClient, ProviderError } from "./providers";
+import { providerClient } from "./providers";
 import type { StepResult } from "./providers/types";
 import { StreamPublisher } from "./publisher";
 import { describeToolCall, executeTool, TOOL_SPECS, type ToolContext } from "./tools";
@@ -169,7 +169,13 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
           result?.usage ?? (streamed ? { inputTokens: promptTokens, outputTokens: estimateTokens(streamed) } : null);
         // If the account couldn't use the chosen model, another one answered: bill what actually ran.
         const billed = result?.billedModel ?? model;
-        await settle(admin, input.runId, usage ? creditsForUsage(billed, usage) : 0, usage, result?.toolCalls.length ?? 0);
+        try {
+          await settle(admin, input.runId, usage ? creditsForUsage(billed, usage) : 0, usage, result?.toolCalls.length ?? 0);
+        } catch (settleError) {
+          // Billing trouble must never hide why the call itself failed.
+          if (result) throw settleError;
+          log.error("could not settle credits for a failed call", { error: settleError });
+        }
       }
 
       text = joinText(text, result.text || streamed);
@@ -208,7 +214,7 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
     } else {
       status = "failed";
       errorMessage = friendlyRunError(error);
-      errorDetail = error instanceof ProviderError ? (error.detail ?? null) : error instanceof Error ? error.message.slice(0, 300) : null;
+      errorDetail = describeFailure(error);
       log.warn("agent reply failed", { error });
     }
   } finally {
@@ -222,7 +228,7 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
       p_error: errorMessage,
     });
     if (error) log.error("could not save the agent reply", { error });
-    if (!error && status === "failed" && errorDetail) {
+    if (!error && status === "failed" && errorDetail && errorDetail !== errorMessage) {
       const { error: detailError } = await admin
         .from("ai_runs")
         .update({ error: `${errorMessage} (${errorDetail})`.slice(0, 500) })

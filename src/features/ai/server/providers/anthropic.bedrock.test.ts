@@ -241,6 +241,27 @@ describe("Claude on Amazon Bedrock", () => {
     expect(seen.map((request) => request.body.model)).toEqual(["anthropic.claude-sonnet-5"]);
   });
 
+  it("says AI is unavailable, listing every model tried, when the account can't use any Claude model", async () => {
+    respond = (request, response) =>
+      apiError(
+        response,
+        403,
+        "permission_error",
+        `${String(request.body.model)} is not available for this account. You can explore other available models on Amazon Bedrock.`,
+      );
+    const provider = await load();
+
+    await expect(provider.generateObject({ ...structuredRequest, model: findModel("claude-haiku-4-5")! })).rejects.toMatchObject({
+      kind: "bad_request",
+      message: "AI isn’t available right now. Try again soon.",
+      detail: expect.stringMatching(
+        /^Tried Claude Haiku 4\.5, Claude Opus 5, Claude Sonnet 5\. 403 anthropic\.claude-sonnet-5 is not available for this account/,
+      ),
+    });
+    expect(seen.map((request) => request.body.model)).toEqual(["anthropic.claude-haiku-4-5", "anthropic.claude-opus-5", "anthropic.claude-sonnet-5"]);
+    expect(paths().every((path) => path.startsWith("/mantle"))).toBe(true);
+  });
+
   it("switches to the runtime endpoint when the Messages endpoint refuses the key, and stays there", async () => {
     respond = (request, response) =>
       request.url.startsWith("/mantle") ? refuse(response) : json(response, 200, toolResult("claude-sonnet-5", "Atlas"));

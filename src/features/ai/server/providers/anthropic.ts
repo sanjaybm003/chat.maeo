@@ -92,15 +92,15 @@ function backend(): ClaudeBackend {
   }
 }
 
-const detailOf = (error: unknown) =>
-  (error instanceof Anthropic.APIError
-    ? `${error.status ?? ""} ${error.message}`
-    : error instanceof Error
-      ? error.message
-      : String(error)
-  )
-    .trim()
-    .slice(0, 400);
+/** "403 anthropic.claude-sonnet-5 is not available for this account…": the status and the provider's own sentence. */
+function detailOf(error: unknown) {
+  if (error instanceof Anthropic.APIError) {
+    const body = error.error as { error?: { message?: unknown } } | undefined;
+    const reason = typeof body?.error?.message === "string" ? body.error.message : error.message;
+    return `${error.status ?? ""} ${reason}`.trim().slice(0, 400);
+  }
+  return (error instanceof Error ? error.message : String(error)).trim().slice(0, 400);
+}
 
 const MODEL_PROBLEM = /\bmodels?\b|identifier|inference profile|throughput|not (?:currently )?(?:available|supported|enabled)|access to/i;
 
@@ -135,16 +135,18 @@ function bedrockHint() {
   return "Check the Bedrock API key and region, and that Claude model access is enabled in the Bedrock console for that account.";
 }
 
-function fail(kind: ProviderErrorKind, message: string, error: unknown): never {
-  throw new ProviderError(kind, "anthropic", message, detailOf(error));
+function fail(kind: ProviderErrorKind, message: string, error: unknown, context?: string): never {
+  const detail = detailOf(error);
+  throw new ProviderError(kind, "anthropic", message, context ? `${context}. ${detail}` : detail);
 }
 
 /** Details stay in the server log and the asker's private run record; the chat gets a plain message. */
-function translateError(error: unknown, active: ClaudeBackend): never {
+function translateError(error: unknown, active: ClaudeBackend, context?: string): never {
   if (error instanceof Anthropic.APIUserAbortError || error instanceof ProviderError) throw error;
   if (isModelRefused(error)) {
-    log.error(`${describe(active)} refused every Claude model it was offered`, { hint: bedrockHint(), error });
-    fail("bad_request", "This model isn’t available right now. Try another model.", error);
+    log.error(`${describe(active)} refused every Claude model it was offered`, { hint: bedrockHint(), context, error });
+    // Every available model was already tried, so there's no other model to suggest.
+    fail("bad_request", UNAVAILABLE, error, context);
   }
   if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
     log.error(`${describe(active)} refused the credentials`, {
@@ -190,6 +192,7 @@ async function withBackend<T>(
     current = alternativesTo(current).find((item) => !isRefused(active, item)) ?? current;
   }
   const tried = new Set<string>();
+  const refused: string[] = [];
   let switchedEndpoint = false;
 
   for (;;) {
@@ -212,6 +215,7 @@ async function withBackend<T>(
       }
 
       if (isModelRefused(error)) {
+        refused.push(current.label);
         if (!isRefused(active, current)) {
           log.warn(`${describe(active)} refused ${current.label}; using another Claude model for now`, { detail: detailOf(error) });
         }
@@ -223,7 +227,7 @@ async function withBackend<T>(
         }
       }
 
-      translateError(error, active);
+      translateError(error, active, refused.length > 0 ? `Tried ${refused.join(", ")}` : undefined);
     }
   }
 }
