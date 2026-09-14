@@ -7,10 +7,11 @@ import { logger } from "@/lib/logger";
 
 import { bedrockModelId, type BedrockEndpoint, type ClaudeHost } from "../../claude-hosts";
 import type { AiModel } from "../../models";
-import { aiEnv } from "../env";
+import { aiEnv, configuredModels } from "../env";
 import {
   ProviderError,
   type AiProviderClient,
+  type ProviderErrorKind,
   type ProviderSession,
   type SessionOptions,
   type StepHooks,
@@ -26,7 +27,7 @@ import {
  * Claude, on Anthropic's API or on Amazon Bedrock. Both speak the Messages API,
  * so one session serves either; the differences are the client, the model ids,
  * and features Bedrock doesn't offer (web search, server-side fallbacks,
- * structured outputs).
+ * structured outputs, beta request fields).
  */
 
 /**
@@ -38,32 +39,38 @@ const SERVER_FALLBACK_MODELS = new Set(["claude-opus-5"]);
 const SERVER_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const WEB_SEARCH_MAX_USES = 3;
 const RESULT_TOOL = "submit_result";
+/** A model Bedrock refused is skipped for this long, then tried again in case access was granted. */
+const REFUSED_MODEL_TTL_MS = 10 * 60 * 1000;
 
 const UNAVAILABLE = "AI isn’t available right now. Try again soon.";
 
 const log = logger.child({ module: "claude" });
 
-type BetaMessages = Pick<Anthropic["beta"]["messages"], "create" | "stream">;
+type MessagesApi = Pick<Anthropic["beta"]["messages"], "create" | "stream">;
 
 interface ClaudeBackend {
   host: ClaudeHost;
   endpoint: "api" | BedrockEndpoint;
-  messages: BetaMessages;
+  messages: MessagesApi;
   modelId: (model: AiModel) => string;
 }
 
-let anthropicMessages: BetaMessages | null = null;
-const bedrockMessages: Partial<Record<BedrockEndpoint, BetaMessages>> = {};
+let anthropicMessages: MessagesApi | null = null;
+const bedrockMessages: Partial<Record<BedrockEndpoint, MessagesApi>> = {};
 /** Set once the runtime endpoint has worked for a key the Messages endpoint refused. */
 let preferRuntime = false;
+/** "<endpoint>:<model id>" → when to try that model on that endpoint again. */
+const refusedModels = new Map<string, number>();
 
 function bedrockBackend(endpoint: BedrockEndpoint): ClaudeBackend {
   const apiKey = aiEnv.bedrockKey ?? undefined;
   const awsRegion = aiEnv.bedrockRegion;
-  bedrockMessages[endpoint] ??=
+  // The plain Messages API: Bedrock has no use for ?beta=true or beta-only request fields.
+  bedrockMessages[endpoint] ??= (
     endpoint === "mantle"
-      ? new AnthropicBedrockMantle({ apiKey, awsRegion }).beta.messages
-      : new AnthropicBedrock({ apiKey, awsRegion }).beta.messages;
+      ? new AnthropicBedrockMantle({ apiKey, awsRegion }).messages
+      : new AnthropicBedrock({ apiKey, awsRegion }).messages
+  ) as unknown as MessagesApi;
   return {
     host: "bedrock",
     endpoint,
@@ -85,10 +92,36 @@ function backend(): ClaudeBackend {
   }
 }
 
-const isAccessError = (error: unknown) =>
-  error instanceof Anthropic.AuthenticationError ||
-  error instanceof Anthropic.PermissionDeniedError ||
-  error instanceof Anthropic.NotFoundError;
+const detailOf = (error: unknown) =>
+  (error instanceof Anthropic.APIError
+    ? `${error.status ?? ""} ${error.message}`
+    : error instanceof Error
+      ? error.message
+      : String(error)
+  )
+    .trim()
+    .slice(0, 400);
+
+const MODEL_PROBLEM = /\bmodels?\b|identifier|inference profile|throughput|not (?:currently )?(?:available|supported|enabled)|access to/i;
+
+/** Bedrock turns away a model the account can't use with a 404, or a 400/403 that names the model. */
+function isModelRefused(error: unknown) {
+  if (error instanceof Anthropic.NotFoundError) return true;
+  return (error instanceof Anthropic.BadRequestError || error instanceof Anthropic.PermissionDeniedError) && MODEL_PROBLEM.test(error.message);
+}
+
+const isCredentialRefused = (error: unknown) =>
+  (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) && !isModelRefused(error);
+
+const refusedKey = (active: ClaudeBackend, model: AiModel) => `${active.endpoint}:${model.id}`;
+const isRefused = (active: ClaudeBackend, model: AiModel) => (refusedModels.get(refusedKey(active, model)) ?? 0) > Date.now();
+
+/** The other Claude models this server can use, the next cheaper ones first. */
+function alternativesTo(model: AiModel): AiModel[] {
+  const claude = configuredModels().filter((item) => item.provider === "anthropic");
+  const index = claude.findIndex((item) => item.id === model.id);
+  return index === -1 ? claude : [...claude.slice(index + 1), ...claude.slice(0, index)];
+}
 
 function describe(active: ClaudeBackend) {
   return active.host === "bedrock" ? `Bedrock ${active.endpoint} endpoint in ${aiEnv.bedrockRegion}` : "Anthropic API";
@@ -102,70 +135,95 @@ function bedrockHint() {
   return "Check the Bedrock API key and region, and that Claude model access is enabled in the Bedrock console for that account.";
 }
 
-/** Details stay in the server log; people in the chat get a plain message. */
+function fail(kind: ProviderErrorKind, message: string, error: unknown): never {
+  throw new ProviderError(kind, "anthropic", message, detailOf(error));
+}
+
+/** Details stay in the server log and the asker's private run record; the chat gets a plain message. */
 function translateError(error: unknown, active: ClaudeBackend): never {
   if (error instanceof Anthropic.APIUserAbortError || error instanceof ProviderError) throw error;
+  if (isModelRefused(error)) {
+    log.error(`${describe(active)} refused every Claude model it was offered`, { hint: bedrockHint(), error });
+    fail("bad_request", "This model isn’t available right now. Try another model.", error);
+  }
   if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
     log.error(`${describe(active)} refused the credentials`, {
       status: error.status,
       hint: active.host === "bedrock" ? bedrockHint() : "Check ANTHROPIC_API_KEY.",
       error,
     });
-    throw new ProviderError("auth", "anthropic", UNAVAILABLE);
-  }
-  if (error instanceof Anthropic.NotFoundError) {
-    log.error(`${describe(active)} doesn't offer the requested model`, { error });
-    throw new ProviderError("bad_request", "anthropic", "This model isn’t available right now. Try another model.");
+    fail("auth", UNAVAILABLE, error);
   }
   if (error instanceof Anthropic.RateLimitError) {
     log.warn(`${describe(active)} rate limited the request`, { error });
-    throw new ProviderError("rate_limited", "anthropic", "AI is busy right now. Try again in a moment.");
+    fail("rate_limited", "AI is busy right now. Try again in a moment.", error);
   }
   if (error instanceof Anthropic.BadRequestError) {
     log.warn(`${describe(active)} rejected the request`, { error });
-    throw new ProviderError("bad_request", "anthropic", "The AI couldn’t process that request.");
+    fail("bad_request", "The AI couldn’t process that request.", error);
   }
   if (error instanceof Anthropic.InternalServerError) {
-    throw new ProviderError("overloaded", "anthropic", "AI had a temporary problem. Try again in a moment.");
+    fail("overloaded", "AI had a temporary problem. Try again in a moment.", error);
   }
   if (error instanceof Anthropic.APIConnectionError) {
     log.warn(`Couldn't reach the ${describe(active)}`, { error });
-    throw new ProviderError("network", "anthropic", "Couldn’t reach the AI service. Try again in a moment.");
+    fail("network", "Couldn’t reach the AI service. Try again in a moment.", error);
   }
   throw error;
 }
 
 /**
- * Runs a call on the current backend. When a Bedrock key is refused by the
- * Messages endpoint (some keys and policies only allow the runtime endpoint),
- * retries once on the runtime endpoint and, if that works, keeps using it.
+ * Runs a call, recovering from what Bedrock accounts commonly hit:
+ *   • a key the Messages endpoint refuses → the runtime endpoint, kept once it works
+ *   • a model the account can't use (Opus often needs separate access) → the next
+ *     available Claude model, remembered for a few minutes so later calls skip it
+ * Only retries while nothing has reached the chat yet. Returns the model that answered.
  */
-async function withBackend<T>(run: (active: ClaudeBackend) => Promise<T>, canRetry: () => boolean): Promise<T> {
-  const active = backend();
-  try {
-    return await run(active);
-  } catch (error) {
-    const retry = active.host === "bedrock" && active.endpoint === "mantle" && !aiEnv.bedrockEndpoint && isAccessError(error) && canRetry();
-    if (!retry) translateError(error, active);
+async function withBackend<T>(
+  model: AiModel,
+  run: (active: ClaudeBackend, model: AiModel) => Promise<T>,
+  canRetry: () => boolean,
+): Promise<{ result: T; model: AiModel }> {
+  let active = backend();
+  let current = model;
+  if (active.host === "bedrock" && isRefused(active, current)) {
+    current = alternativesTo(current).find((item) => !isRefused(active, item)) ?? current;
+  }
+  const tried = new Set<string>();
+  let switchedEndpoint = false;
 
-    const runtime = bedrockBackend("runtime");
+  for (;;) {
+    tried.add(`${active.endpoint}:${current.id}`);
     try {
-      const result = await run(runtime);
-      if (!preferRuntime) {
+      const result = await run(active, current);
+      if (switchedEndpoint && !preferRuntime) {
         preferRuntime = true;
-        log.warn("Bedrock Messages endpoint refused this key; using the Bedrock runtime endpoint", {
-          status: (error as { status?: number }).status,
-        });
+        log.warn("Bedrock Messages endpoint refused this key; using the Bedrock runtime endpoint");
       }
-      return result;
-    } catch (retryError) {
-      if (isAccessError(retryError)) {
-        log.error("Both Bedrock endpoints refused the request", {
-          messagesStatus: (error as { status?: number }).status,
-          runtimeStatus: (retryError as { status?: number }).status,
-        });
+      return { result, model: current };
+    } catch (error) {
+      if (active.host !== "bedrock" || !canRetry()) translateError(error, active);
+
+      if (isCredentialRefused(error) && active.endpoint === "mantle" && !aiEnv.bedrockEndpoint && !switchedEndpoint) {
+        log.warn("Bedrock Messages endpoint refused the credentials; trying the runtime endpoint", { detail: detailOf(error) });
+        switchedEndpoint = true;
+        active = bedrockBackend("runtime");
+        continue;
       }
-      translateError(retryError, runtime);
+
+      if (isModelRefused(error)) {
+        if (!isRefused(active, current)) {
+          log.warn(`${describe(active)} refused ${current.label}; using another Claude model for now`, { detail: detailOf(error) });
+        }
+        refusedModels.set(refusedKey(active, current), Date.now() + REFUSED_MODEL_TTL_MS);
+        const next = alternativesTo(current).find((item) => !tried.has(`${active.endpoint}:${item.id}`) && !isRefused(active, item));
+        if (next) {
+          current = next;
+          continue;
+        }
+      }
+
+      translateError(error, active);
     }
   }
 }
@@ -223,6 +281,24 @@ function echoableContent(content: Anthropic.Beta.BetaContentBlock[]): Anthropic.
   return content.filter((block, index) => index > boundary || block.type === "text");
 }
 
+/** What Bedrock is sent back: each block's core fields only, never beta-only ones like `caller`. */
+function plainContent(content: Anthropic.Beta.BetaContentBlock[]): Anthropic.Beta.BetaContentBlockParam[] {
+  return content.flatMap((block): Anthropic.Beta.BetaContentBlockParam[] => {
+    switch (block.type) {
+      case "text":
+        return block.text ? [{ type: "text", text: block.text }] : [];
+      case "tool_use":
+        return [{ type: "tool_use", id: block.id, name: block.name, input: block.input ?? {} }];
+      case "thinking":
+        return [{ type: "thinking", thinking: block.thinking, signature: block.signature }];
+      case "redacted_thinking":
+        return [{ type: "redacted_thinking", data: block.data }];
+      default:
+        return [];
+    }
+  });
+}
+
 const textOf = (content: Anthropic.Beta.BetaContentBlock[]) =>
   content
     .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === "text")
@@ -242,7 +318,7 @@ class ClaudeSession implements ProviderSession {
     }));
   }
 
-  step(hooks: StepHooks): Promise<StepResult> {
+  async step(hooks: StepHooks): Promise<StepResult> {
     let streamed = false;
     const tracked: StepHooks = {
       ...hooks,
@@ -251,12 +327,17 @@ class ClaudeSession implements ProviderSession {
         hooks.onText(delta);
       },
     };
-    // Only retry on another endpoint before anything reached the chat.
-    return withBackend((active) => this.run(active, tracked), () => !streamed && !hooks.signal.aborted);
+    // Only retry elsewhere before anything reached the chat.
+    const { result, model } = await withBackend(
+      this.options.model,
+      (active, current) => this.run(active, current, tracked),
+      () => !streamed && !hooks.signal.aborted,
+    );
+    return model.id === this.options.model.id ? result : { ...result, billedModel: model };
   }
 
-  private async run(active: ClaudeBackend, { signal, onText, onActivity }: StepHooks): Promise<StepResult> {
-    const { model, system, maxOutputTokens, temperature, webSearch } = this.options;
+  private async run(active: ClaudeBackend, model: AiModel, { signal, onText, onActivity }: StepHooks): Promise<StepResult> {
+    const { system, maxOutputTokens, temperature, webSearch } = this.options;
     const search = active.host === "anthropic" && webSearch ? webSearchTool(model) : null;
     const tools = search ? [...this.functionTools, search] : this.functionTools;
 
@@ -283,8 +364,11 @@ class ClaudeSession implements ProviderSession {
     }
 
     const message = await stream.finalMessage();
-    const content = echoableContent(message.content);
-    this.messages.push({ role: "assistant", content: content as Anthropic.Beta.BetaContentBlockParam[] });
+    const content = active.host === "anthropic" ? echoableContent(message.content) : message.content;
+    this.messages.push({
+      role: "assistant",
+      content: active.host === "anthropic" ? (content as Anthropic.Beta.BetaContentBlockParam[]) : plainContent(content),
+    });
 
     const toolCalls: ToolCall[] = content
       .filter((block): block is Anthropic.Beta.BetaToolUseBlock => block.type === "tool_use")
@@ -365,5 +449,12 @@ async function structured<T>(
 export const anthropicProvider: AiProviderClient = {
   createSession: (options) => new ClaudeSession(options),
 
-  generateObject: (request) => withBackend((active) => structured(active, request), () => !request.signal?.aborted),
+  async generateObject(request) {
+    const { result, model } = await withBackend(
+      request.model,
+      (active, current) => structured(active, { ...request, model: current }),
+      () => !request.signal?.aborted,
+    );
+    return model.id === request.model.id ? result : { ...result, model };
+  },
 };

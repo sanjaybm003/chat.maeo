@@ -49,6 +49,8 @@ export interface StepResult {
   usage: StepUsage;
   outcome: StepOutcome;
   servedModel?: string;
+  /** Set when the account couldn't use the requested model and another one answered; bill with this one. */
+  billedModel?: AiModel;
 }
 
 export interface StepHooks {
@@ -85,7 +87,8 @@ export interface StructuredRequest<T> {
 
 export interface AiProviderClient {
   createSession(options: SessionOptions): ProviderSession;
-  generateObject<T>(request: StructuredRequest<T>): Promise<{ value: T; usage: StepUsage }>;
+  /** `model` is set when a different model than the requested one produced the result. */
+  generateObject<T>(request: StructuredRequest<T>): Promise<{ value: T; usage: StepUsage; model?: AiModel }>;
 }
 
 export type ProviderErrorKind = "not_configured" | "auth" | "rate_limited" | "overloaded" | "bad_request" | "refused" | "network";
@@ -95,6 +98,8 @@ export class ProviderError extends Error {
     readonly kind: ProviderErrorKind,
     readonly provider: AiProvider,
     message: string,
+    /** The provider's own reason, for logs and the asker's private run record. Never shown in the chat. */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = "ProviderError";

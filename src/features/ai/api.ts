@@ -114,6 +114,8 @@ export interface RecentRun {
   toolCalls: number;
   createdAt: string;
   finishedAt: string | null;
+  /** Why a run failed, including the provider's reason. Runs are private to the person who asked. */
+  error: string | null;
 }
 
 /** Runs are private to the person who asked, so this is always "my runs". */
@@ -121,7 +123,7 @@ export async function fetchRecentRuns(limit = 25): Promise<RecentRun[]> {
   const rows = unwrap(
     await db()
       .from("ai_runs")
-      .select("id, kind, workspace_id, agent_id, model, status, credits_charged, input_tokens, output_tokens, tool_calls, created_at, finished_at")
+      .select("id, kind, workspace_id, agent_id, model, status, credits_charged, input_tokens, output_tokens, tool_calls, created_at, finished_at, error")
       .order("created_at", { ascending: false })
       .limit(limit),
   );
@@ -138,5 +140,6 @@ export async function fetchRecentRuns(limit = 25): Promise<RecentRun[]> {
     toolCalls: row.tool_calls,
     createdAt: row.created_at,
     finishedAt: row.finished_at,
+    error: row.error,
   }));
 }

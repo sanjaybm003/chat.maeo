@@ -21,7 +21,6 @@ export const TOOL_SPECS: Record<FunctionToolId, ToolSpec> = {
       properties: {
         limit: { type: "integer", description: "How many older messages to read, from 1 to 50.", minimum: 1, maximum: 50 },
       },
-      required: [],
     },
   },
   search: {
@@ -37,7 +36,7 @@ export const TOOL_SPECS: Record<FunctionToolId, ToolSpec> = {
   directory: {
     name: "list_workspace_members",
     description: "List everyone in this workspace with their name, job title, role and status.",
-    parameters: { type: "object", properties: {}, required: [] },
+    parameters: { type: "object", properties: {} },
   },
 };
 

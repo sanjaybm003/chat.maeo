@@ -368,7 +368,8 @@ export type Database = {
           finished_at: string | null;
         };
         Insert: never;
-        Update: never;
+        /** Server only (service role): the provider's reason for a failed run. */
+        Update: { error?: string | null };
         Relationships: [];
       };
       ai_wallets: {

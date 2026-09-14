@@ -316,7 +316,14 @@ function RunsTable({ runs, summary }: { runs: RecentRun[]; summary: UsageSummary
               </td>
               <td className="px-2 py-2.5 text-ink-2">{workspaceNames.get(run.workspaceId) ?? "—"}</td>
               <td className="whitespace-nowrap px-2 py-2.5 font-mono text-[12px] text-ink-2">{findModel(run.model)?.label ?? run.model}</td>
-              <td className={cn("px-2 py-2.5", run.status === "failed" ? "text-danger" : "text-ink-2")}>{STATUS_LABEL[run.status]}</td>
+              <td className={cn("px-2 py-2.5", run.status === "failed" ? "text-danger" : "text-ink-2")}>
+                {STATUS_LABEL[run.status]}
+                {run.status === "failed" && run.error ? (
+                  <span className="mt-0.5 block max-w-[280px] whitespace-normal break-words text-[11.5px] leading-snug text-ink-3">
+                    {run.error}
+                  </span>
+                ) : null}
+              </td>
               <td className="px-1 py-2.5 text-right font-mono tabular-nums text-ink">{formatCredits(run.credits)}</td>
             </tr>
           ))}

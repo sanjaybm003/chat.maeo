@@ -17,7 +17,7 @@ import { SPECIALTY_PROFILES } from "../specialties";
 import type { AdminClient } from "./directory";
 import { configuredModels } from "./env";
 import { AgentRunError } from "./errors";
-import { providerClient } from "./providers";
+import { providerClient, ProviderError } from "./providers";
 import type { StepUsage } from "./providers/types";
 
 const MAX_OUTPUT_TOKENS = 4000;
@@ -165,7 +165,9 @@ export async function draftAgentBlueprint(input: {
       ...result.value,
       handle: uniqueHandle(result.value.handle, new Set(context.agents.map((agent) => agent.handle))),
     };
-    const credits = creditsForUsage(model, usage);
+    // If the account couldn't use the preferred model, another one drafted it: bill what actually ran.
+    const billed = result.model ?? model;
+    const credits = creditsForUsage(billed, usage);
     await admin.rpc("ai_settle_credits", {
       p_run_id: runId,
       p_credits: credits,
@@ -173,7 +175,7 @@ export async function draftAgentBlueprint(input: {
       p_output_tokens: usage.outputTokens,
     });
     await admin.rpc("ai_finish_run", { p_run_id: runId, p_status: "succeeded" });
-    return { draft, model: model.id, credits };
+    return { draft, model: billed.id, credits };
   } catch (error) {
     log.warn("architect failed", { runId, error });
     const credits = usage ? creditsForUsage(model, usage) : 0;
@@ -181,7 +183,13 @@ export async function draftAgentBlueprint(input: {
     await admin.rpc("ai_finish_run", {
       p_run_id: runId,
       p_status: "failed",
-      p_error: error instanceof Error ? error.message.slice(0, 300) : "Drafting failed.",
+      // Drafting runs have no chat message, so the provider's reason goes straight onto the private run record.
+      p_error: (error instanceof ProviderError && error.detail
+        ? `${error.message} (${error.detail})`
+        : error instanceof Error
+          ? error.message
+          : "Drafting failed."
+      ).slice(0, 500),
     });
     if (error instanceof AgentRunError) throw error;
     if (error instanceof SyntaxError || (error instanceof Error && error.name === "ZodError")) {
