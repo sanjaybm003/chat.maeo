@@ -14,6 +14,8 @@ import {
   creditsEventSchema,
   readEventSchema,
   reactionEventSchema,
+  taskAssignedSchema,
+  taskRefSchema,
   userRefSchema,
   workspaceRefSchema,
   type ReactionEvent,
@@ -38,6 +40,13 @@ export interface RealtimeEngineHandlers {
   onCreditsChanged: (balance: number) => void;
   /** Debounced per agent. */
   onAgentChanged: (agentId: string) => void;
+  /** Debounced per task. */
+  onTaskChanged: (taskId: string) => void;
+  onTaskRemoved: (taskId: string) => void;
+  /** Someone gave the signed-in person a task, in any workspace. */
+  onTaskAssigned: (event: { taskId: string; by: string }) => void;
+  /** Debounced. */
+  onIntegrationsChanged: () => void;
 }
 
 const log = logger.child({ module: "realtime-engine" });
@@ -62,6 +71,8 @@ export class RealtimeEngine {
   private readonly memberRefresh: KeyedDebouncer<string>;
   private readonly workspaceRefresh: KeyedDebouncer<"workspace">;
   private readonly agentRefresh: KeyedDebouncer<string>;
+  private readonly taskRefresh: KeyedDebouncer<string>;
+  private readonly integrationsRefresh: KeyedDebouncer<"integrations">;
 
   constructor(
     private readonly supabase: BrowserSupabase,
@@ -72,6 +83,8 @@ export class RealtimeEngine {
     this.memberRefresh = new KeyedDebouncer(400, (userId) => handlers.onMemberChanged(userId));
     this.workspaceRefresh = new KeyedDebouncer(400, () => handlers.onWorkspaceUpdated());
     this.agentRefresh = new KeyedDebouncer(300, (agentId) => handlers.onAgentChanged(agentId));
+    this.taskRefresh = new KeyedDebouncer(250, (taskId) => handlers.onTaskChanged(taskId));
+    this.integrationsRefresh = new KeyedDebouncer(300, () => handlers.onIntegrationsChanged());
   }
 
   async start() {
@@ -116,6 +129,9 @@ export class RealtimeEngine {
       .on("broadcast", { event: "credits.changed" }, ({ payload }) =>
         this.parse(creditsEventSchema, payload, (balance) => this.handlers.onCreditsChanged(balance)),
       )
+      .on("broadcast", { event: "task.assigned" }, ({ payload }) =>
+        this.parse(taskAssignedSchema, payload, (event) => this.handlers.onTaskAssigned(event)),
+      )
       .subscribe((status) => this.onFeedStatus(status));
 
     this.room = this.supabase
@@ -131,6 +147,16 @@ export class RealtimeEngine {
       .on("broadcast", { event: "agent.changed" }, ({ payload }) =>
         this.parse(agentRefSchema, payload, (agentId) => this.agentRefresh.schedule(agentId)),
       )
+      .on("broadcast", { event: "task.changed" }, ({ payload }) =>
+        this.parse(taskRefSchema, payload, (taskId) => this.taskRefresh.schedule(taskId)),
+      )
+      .on("broadcast", { event: "task.removed" }, ({ payload }) =>
+        this.parse(taskRefSchema, payload, (taskId) => {
+          this.taskRefresh.cancel(taskId);
+          this.handlers.onTaskRemoved(taskId);
+        }),
+      )
+      .on("broadcast", { event: "integrations.changed" }, () => this.integrationsRefresh.schedule("integrations"))
       .subscribe((status) => {
         if (status === "SUBSCRIBED" && !this.disposed) void this.track();
       });
@@ -149,6 +175,8 @@ export class RealtimeEngine {
     this.memberRefresh.cancelAll();
     this.workspaceRefresh.cancelAll();
     this.agentRefresh.cancelAll();
+    this.taskRefresh.cancelAll();
+    this.integrationsRefresh.cancelAll();
     const channels = [this.feed, this.room].filter((channel): channel is RealtimeChannel => channel !== null);
     this.feed = null;
     this.room = null;

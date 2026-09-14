@@ -66,6 +66,10 @@ export function systemMessageText(meta: SystemMeta, senderId: string | null, mem
       return `${actor} added ${meta.name ?? "an agent"} to this chat`;
     case "agent_removed":
       return `${actor} removed ${meta.name ?? "an agent"} from this chat`;
+    case "task_created":
+      return `${actor} created ${meta.number ? `T-${meta.number}` : "a task"}${meta.name ? `: ${meta.name}` : ""}`;
+    case "task_completed":
+      return `${actor} finished ${meta.number ? `T-${meta.number}` : "a task"}${meta.name ? `: ${meta.name}` : ""}`;
     default:
       return "Conversation updated";
   }

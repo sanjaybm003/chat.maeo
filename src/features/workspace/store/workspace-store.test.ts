@@ -72,6 +72,8 @@ function makeStore(conversations: Conversation[] = [conversation("c1")]) {
     workspaces: [],
     members: [],
     ai: { ready: true, models: [], webSearch: false, agents: [], credits: null },
+    tasks: { ready: true, items: [] },
+    integrations: { githubAvailable: false, items: [] },
     conversations,
     pendingInvitations: [],
   });

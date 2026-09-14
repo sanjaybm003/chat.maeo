@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 import { aiEnv, configuredModels } from "@/features/ai/server/env";
+import { webSearchAvailable } from "@/features/ai/server/web";
+import { githubApp } from "@/features/integrations/server/github";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import type { Database } from "@/types/database";
@@ -35,7 +37,8 @@ export async function GET() {
     uptimeSeconds: Math.round(process.uptime()),
     checks: { database: { ok: databaseOk, latencyMs: Date.now() - started } },
     // Which connections are switched on, never the keys themselves.
-    ai: { claude: aiEnv.claudeHost, models: configuredModels().length },
+    ai: { claude: aiEnv.claudeHost, models: configuredModels().length, webSearch: webSearchAvailable() },
+    integrations: { github: githubApp.configured },
   };
 
   return NextResponse.json(body, {

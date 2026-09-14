@@ -6,13 +6,15 @@ import { toast } from "sonner";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { IconCopy, IconMore, IconPencil, IconReply, IconSmile, IconTrash } from "@/components/ui/icons";
+import { IconCopy, IconMore, IconPencil, IconReply, IconSmile, IconSpark, IconTasks, IconTrash } from "@/components/ui/icons";
 import { LocalTime } from "@/components/ui/local-time";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AgentAvatar, AgentTag } from "@/features/ai/components/agent-avatar";
 import { AgentReplyBody, AgentReplyFooter } from "@/features/ai/components/agent-reply";
+import { useSaveAsExample } from "@/features/ai/hooks/use-save-example";
 import { plainText } from "@/features/ai/lib/rich-text";
+import { taskDraftFromMessage } from "@/features/tasks/lib/task-drafts";
 import { isRunLive } from "@/features/workspace/store/helpers";
 import { useWorkspace } from "@/features/workspace/store/workspace-provider";
 import { personColorStyle } from "@/lib/colors";
@@ -59,6 +61,12 @@ export const MessageItem = memo(function MessageItem({
 }: MessageItemProps) {
   const editing = useWorkspace((state) => state.editingMessageId === message.id);
   const setEditing = useWorkspace((state) => state.setEditingMessage);
+  const tasksReady = useWorkspace((state) => state.tasksReady);
+  const openDialog = useWorkspace((state) => state.openDialog);
+  const canTuneAgent = useWorkspace(
+    (state) => Boolean(agent && !agent.archivedAt && (agent.createdBy === state.me.id || state.myRole !== "member")),
+  );
+  const saveAsExample = useSaveAsExample();
   const [toolsOpen, setToolsOpen] = useState(false);
   const [tapped, setTapped] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -203,6 +211,16 @@ export const MessageItem = memo(function MessageItem({
                   {hasText ? (
                     <MenuItem icon={<IconCopy size={16} />} onSelect={() => void copyText()}>
                       Copy text
+                    </MenuItem>
+                  ) : null}
+                  {hasText && tasksReady ? (
+                    <MenuItem icon={<IconTasks size={16} />} onSelect={() => openDialog({ name: "task", draft: taskDraftFromMessage(message) })}>
+                      Make a task
+                    </MenuItem>
+                  ) : null}
+                  {isAgent && hasText && canTuneAgent && message.run?.status === "done" ? (
+                    <MenuItem icon={<IconSpark size={16} />} onSelect={() => void saveAsExample(message)}>
+                      Save as an example
                     </MenuItem>
                   ) : null}
                   {mine ? (

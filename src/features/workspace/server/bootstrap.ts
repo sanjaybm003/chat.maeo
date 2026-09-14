@@ -3,20 +3,48 @@ import "server-only";
 import { notFound, redirect } from "next/navigation";
 
 import { configuredModels } from "@/features/ai/server/env";
+import { webSearchAvailable } from "@/features/ai/server/web";
+import { githubApp } from "@/features/integrations/server/github";
+import { TASK_WINDOW_DAYS } from "@/features/tasks/api";
 import { logger } from "@/lib/logger";
-import { mapAgent, mapConversation, mapCreditAccount, mapMember, mapWorkspace } from "@/lib/mappers";
+import { mapAgent, mapConversation, mapCreditAccount, mapIntegration, mapMember, mapTask, mapWorkspace } from "@/lib/mappers";
 import { routes } from "@/lib/routes";
 import { getMyPendingInvitations, getMyWorkspaces, getOwnProfile, getServerSupabase } from "@/server/session";
 
-import type { AiBootstrap, WorkspaceBootstrap } from "../store/workspace-store";
+import type { AiBootstrap, IntegrationsBootstrap, TasksBootstrap, WorkspaceBootstrap } from "../store/workspace-store";
 
 type ServerSupabase = Awaited<ReturnType<typeof getServerSupabase>>;
+
+/** Tasks stay hidden until the tasks migration is applied; everything else keeps working. */
+async function loadTasks(supabase: ServerSupabase, workspaceId: string): Promise<TasksBootstrap> {
+  const since = new Date(Date.now() - TASK_WINDOW_DAYS * 86_400_000).toISOString();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .or(`status.in.(todo,in_progress,blocked),updated_at.gte.${since}`)
+    .order("updated_at", { ascending: false })
+    .limit(1000);
+  if (error) {
+    logger.warn("Tasks unavailable; apply supabase/migrations/20260917000100_tasks_tuning_integrations.sql", { error });
+    return { ready: false, items: [] };
+  }
+  return { ready: true, items: (data ?? []).flatMap((row) => mapTask(row) ?? []) };
+}
+
+async function loadIntegrations(supabase: ServerSupabase, workspaceId: string): Promise<IntegrationsBootstrap> {
+  const { data, error } = await supabase.from("workspace_integrations").select("*").eq("workspace_id", workspaceId);
+  return {
+    githubAvailable: githubApp.configured,
+    items: error ? [] : (data ?? []).flatMap((row) => mapIntegration(row) ?? []),
+  };
+}
 
 /** Chat keeps working on a database that hasn't had the AI migrations yet; agents just stay hidden. */
 async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: string): Promise<AiBootstrap> {
   const available = configuredModels();
   const models = available.map((model) => model.id);
-  const webSearch = available.some((model) => model.webSearch !== null);
+  const webSearch = webSearchAvailable() || available.some((model) => model.webSearch !== null);
   const [agents, credits] = await Promise.all([
     supabase.from("ai_agents").select("*").eq("workspace_id", workspaceId).order("created_at"),
     supabase
@@ -55,10 +83,12 @@ export async function loadWorkspaceBootstrap(userId: string, slug: string): Prom
   if (!workspaceResult.data) notFound();
 
   const workspace = mapWorkspace(workspaceResult.data);
-  const [membersResult, conversationsResult, ai] = await Promise.all([
+  const [membersResult, conversationsResult, ai, tasks, integrations] = await Promise.all([
     supabase.rpc("list_workspace_members", { p_workspace_id: workspace.id }),
     supabase.rpc("list_conversations", { p_workspace_id: workspace.id }),
     loadAi(supabase, workspace.id, userId),
+    loadTasks(supabase, workspace.id),
+    loadIntegrations(supabase, workspace.id),
   ]);
   if (membersResult.error) throw membersResult.error;
   if (conversationsResult.error) throw conversationsResult.error;
@@ -72,5 +102,7 @@ export async function loadWorkspaceBootstrap(userId: string, slug: string): Prom
     conversations: (conversationsResult.data ?? []).map(mapConversation),
     pendingInvitations,
     ai,
+    tasks,
+    integrations,
   };
 }

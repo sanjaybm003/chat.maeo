@@ -5,11 +5,15 @@ import { useEffect } from "react";
 import { toast } from "sonner";
 
 import { fetchAgent } from "@/features/ai/api";
+import { fetchIntegrations } from "@/features/integrations/api";
+import { fetchTask, fetchTasks } from "@/features/tasks/api";
+import { taskKey } from "@/features/tasks/lib/task-meta";
 import { watchActivity } from "@/lib/browser/activity";
 import { startTabCoordinator } from "@/lib/browser/tab-coordinator";
 import { logger } from "@/lib/logger";
 import { routes } from "@/lib/routes";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { firstNameOf } from "@/lib/utils";
 import type { Message } from "@/types/domain";
 
 import { fetchConversation } from "../api/conversations";
@@ -111,6 +115,37 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
       if (!disposed && workspace) state().setWorkspace(workspace);
     }
 
+    async function refreshTask(taskId: string) {
+      const task = await fetchTask(taskId).catch(() => undefined);
+      if (disposed || task === undefined) return;
+      if (!task) state().removeTask(taskId);
+      else if (task.workspaceId === workspaceId) state().upsertTask(task);
+    }
+
+    /** After time away, the task list catches up in one read. */
+    async function refreshTasks() {
+      if (!state().tasksReady) return;
+      const tasks = await fetchTasks(workspaceId).catch(() => null);
+      if (!disposed && tasks) state().setTasks(tasks);
+    }
+
+    async function refreshIntegrations() {
+      const integrations = await fetchIntegrations(workspaceId).catch(() => null);
+      if (!disposed && integrations) state().setIntegrations(integrations);
+    }
+
+    async function announceAssignment(taskId: string, by: string) {
+      const task = state().tasks[taskId] ?? (await fetchTask(taskId).catch(() => null));
+      // The personal feed spans workspaces; only this workspace's tasks show here.
+      if (disposed || !task || task.workspaceId !== workspaceId) return;
+      state().upsertTask(task);
+      const slug = state().workspace.slug;
+      toast(`${firstNameOf(state().members[by], "Someone")} gave you ${taskKey(task.number)}`, {
+        description: task.title,
+        action: { label: "Open", onClick: () => router.push(routes.task(slug, task.number)) },
+      });
+    }
+
     const engine = new RealtimeEngine(
       supabase,
       { userId: meId, workspaceId },
@@ -120,6 +155,8 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
           if (reconnected) {
             void sync.request("reconnected");
             outbox.kick();
+            void refreshTasks();
+            void refreshIntegrations();
           }
         },
         onMessageCreated: (message) => void handleMessageCreated(message),
@@ -146,6 +183,10 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
         onPresence: (entries) => state().setPresence(entries),
         onCreditsChanged: (balance) => state().setCreditBalance(balance),
         onAgentChanged: (agentId) => void refreshAgent(agentId),
+        onTaskChanged: (taskId) => void refreshTask(taskId),
+        onTaskRemoved: (taskId) => state().removeTask(taskId),
+        onTaskAssigned: ({ taskId, by }) => void announceAssignment(taskId, by),
+        onIntegrationsChanged: () => void refreshIntegrations(),
       },
     );
     void engine.start();
@@ -167,6 +208,7 @@ export function useRealtimeSync({ outbox, sync }: WorkspaceRuntime) {
         hiddenAt = null;
         void sync.request("tab-visible");
         outbox.kick();
+        void refreshTasks();
       }
     };
     const onOnline = () => {

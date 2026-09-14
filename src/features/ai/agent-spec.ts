@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   AGENT_GLYPHS,
   AGENT_TOOL_IDS,
+  CREATIVITY_LEVELS,
   MODEL_MODES,
   PERSON_COLORS,
   RESPONSE_STYLES,
@@ -35,13 +36,40 @@ export const AGENT_TOOLS: readonly { id: AgentToolId; label: string; description
   {
     id: "web",
     label: "Search the web",
-    description: "Looks things up online when a question needs current facts. Uses a model that can browse.",
+    description: "Looks things up online and reads links people share, with sources, when a question needs current or outside facts.",
+  },
+  {
+    id: "tasks",
+    label: "Manage tasks",
+    description: "Checks, creates and updates the team’s tasks for the person who asks, and shares new ones in the chat.",
+  },
+  {
+    id: "github",
+    label: "Work in GitHub",
+    description: "Reads code in the workspace’s connected repositories and opens pull requests for the team to review.",
   },
 ];
 
 export const HANDLE_PATTERN = /^[a-z][a-z0-9-]{1,22}[a-z0-9]$/;
 export const MAX_STARTERS = 3;
 export const MAX_KNOWLEDGE = 8000;
+export const MAX_RULES = 4000;
+export const MAX_EXAMPLES = 6;
+export const MAX_EXAMPLE_PROMPT = 800;
+export const MAX_EXAMPLE_REPLY = 2800;
+
+export const agentExampleSchema = z.object({
+  prompt: z
+    .string()
+    .trim()
+    .min(1, "Write the message the agent gets.")
+    .max(MAX_EXAMPLE_PROMPT, `Keep the message under ${MAX_EXAMPLE_PROMPT} characters.`),
+  reply: z
+    .string()
+    .trim()
+    .min(1, "Write the reply you want.")
+    .max(MAX_EXAMPLE_REPLY, `Keep the reply under ${MAX_EXAMPLE_REPLY.toLocaleString("en")} characters.`),
+});
 
 /** "Release Notes Writer" → "release-notes-writer", always a valid handle. */
 export function toHandle(name: string): string {
@@ -74,6 +102,10 @@ export const agentInputSchema = z.object({
     .min(20, "Describe how it should work in at least a sentence.")
     .max(8000, "Keep instructions under 8,000 characters."),
   knowledge: z.string().trim().max(MAX_KNOWLEDGE, "Keep team knowledge under 8,000 characters.").default(""),
+  rules: z.string().trim().max(MAX_RULES, "Keep rules under 4,000 characters.").default(""),
+  examples: z.array(agentExampleSchema).max(MAX_EXAMPLES, `Keep it to ${MAX_EXAMPLES} examples.`).default([]),
+  creativity: z.enum(CREATIVITY_LEVELS).default("balanced"),
+  doubleCheck: z.boolean().default(false),
   specialty: z.enum(SPECIALTIES),
   responseStyle: z.enum(RESPONSE_STYLES),
   modelMode: z.enum(MODEL_MODES),

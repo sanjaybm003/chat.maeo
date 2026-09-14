@@ -13,6 +13,7 @@ import {
   IconSliders,
   IconSpark,
   IconSun,
+  IconTasks,
   IconUserPlus,
   IconUsers,
 } from "@/components/ui/icons";
@@ -22,6 +23,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { useOpenAgentRoom } from "@/features/ai/hooks/use-open-agent-room";
 import { conversationTitle } from "@/features/chat/lib/conversation-meta";
+import { TaskStatusIcon } from "@/features/tasks/components/task-marks";
+import { TASK_STATUS_META, taskKey } from "@/features/tasks/lib/task-meta";
 import { readPreferences, resolveTheme, usePreferences } from "@/lib/preferences";
 import { rankItems } from "@/lib/search/fuzzy";
 import { routes } from "@/lib/routes";
@@ -109,6 +112,9 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const openDialog = useWorkspace((state) => state.openDialog);
   const agents = useWorkspace((state) => state.agents);
   const aiReady = useWorkspace((state) => state.aiReady);
+  const tasks = useWorkspace((state) => state.tasks);
+  const tasksReady = useWorkspace((state) => state.tasksReady);
+  const activeConversationId = useWorkspace((state) => state.activeConversationId);
   const openConversation = useOpenConversation();
   const messagePerson = useMessagePerson();
   const openAgentRoom = useOpenAgentRoom();
@@ -178,6 +184,27 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       run: go(() => void openAgentRoom(agent.id)),
     }));
 
+    const taskItems: PaletteItem[] = (
+      q && tasksReady
+        ? rankItems(
+            Object.values(tasks),
+            q,
+            (task) => [
+              [task.title, 1],
+              [taskKey(task.number), 1],
+            ],
+            5,
+          )
+        : []
+    ).map((task) => ({
+      key: `task-${task.id}`,
+      section: "Tasks",
+      label: task.title,
+      hint: `${taskKey(task.number)} · ${TASK_STATUS_META[task.status].label}`,
+      leading: <TaskStatusIcon status={task.status} size={17} />,
+      run: go(() => router.push(routes.task(workspace.slug, task.number))),
+    }));
+
     const messages: PaletteItem[] = search.items.map((result) => {
       const conversation = conversations[result.conversationId];
       const sender = result.senderId ? members[result.senderId] : null;
@@ -210,6 +237,25 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         leading: <IconCompose size={17} />,
         run: () => openDialog({ name: "new-chat" }),
       },
+      ...(tasksReady
+        ? [
+            {
+              key: "action-new-task",
+              section: "Actions",
+              label: "Create a task",
+              hint: "or press T",
+              leading: <IconTasks size={17} />,
+              run: () => openDialog({ name: "task", draft: activeConversationId ? { conversationId: activeConversationId } : {} }),
+            },
+            {
+              key: "action-tasks",
+              section: "Actions",
+              label: "Open tasks",
+              leading: <IconTasks size={17} />,
+              run: go(() => router.push(routes.tasks(workspace.slug))),
+            },
+          ]
+        : []),
       {
         key: "action-invite",
         section: "Actions",
@@ -258,8 +304,8 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       },
     ].filter((item) => (q ? String(item.label).toLowerCase().includes(q) : true));
 
-    return [...chats, ...agentItems, ...people, ...messages, ...actions];
-  }, [members, conversations, agents, aiReady, me.id, online, q, query, search.items, workspace.slug, onClose, openConversation, messagePerson, openAgentRoom, openDialog, router, updatePreferences]);
+    return [...chats, ...taskItems, ...agentItems, ...people, ...messages, ...actions];
+  }, [members, conversations, agents, aiReady, tasks, tasksReady, activeConversationId, me.id, online, q, query, search.items, workspace.slug, onClose, openConversation, messagePerson, openAgentRoom, openDialog, router, updatePreferences]);
 
   const activeIndex = Math.min(highlight, Math.max(items.length - 1, 0));
 

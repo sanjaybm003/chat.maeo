@@ -3,10 +3,14 @@ import type { Json, RpcReturn, Tables } from "@/types/database";
 import {
   AGENT_GLYPHS,
   AGENT_TOOL_IDS,
+  CREATIVITY_LEVELS,
   MODEL_MODES,
   RESPONSE_STYLES,
   SPECIALTIES,
+  TASK_PRIORITIES,
+  TASK_STATUSES,
   type Agent,
+  type AgentExample,
   type AgentRoute,
   type AgentRun,
   type AgentRunStatus,
@@ -15,6 +19,7 @@ import {
   type Attachment,
   type Conversation,
   type CreditAccount,
+  type Integration,
   type Member,
   type Message,
   type MessageKind,
@@ -24,6 +29,7 @@ import {
   type Reaction,
   type ReplyPreview,
   type SystemMeta,
+  type Task,
   type UsageSummary,
   type Workspace,
   type WorkspaceSummary,
@@ -130,6 +136,9 @@ function mapMeta(value: unknown): SystemMeta {
   };
   const agentId = str(value.agent_id);
   if (agentId) meta.agent_id = agentId;
+  const taskId = str(value.task_id);
+  if (taskId) meta.task_id = taskId;
+  if (typeof value.number === "number" && Number.isInteger(value.number)) meta.number = value.number;
   return meta;
 }
 
@@ -308,6 +317,15 @@ export function previewOf(message: Message): MessagePreview {
 
 const isToolId = (value: string): value is AgentToolId => (AGENT_TOOL_IDS as readonly string[]).includes(value);
 
+const MAX_EXAMPLES = 6;
+
+export function mapAgentExamples(value: unknown): AgentExample[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((item) => (isObject(item) && str(item.prompt) && str(item.reply) ? [{ prompt: item.prompt as string, reply: item.reply as string }] : []))
+    .slice(0, MAX_EXAMPLES);
+}
+
 export function mapAgent(row: Tables<"ai_agents">): Agent {
   return {
     id: row.id,
@@ -318,6 +336,11 @@ export function mapAgent(row: Tables<"ai_agents">): Agent {
     tagline: row.tagline ?? "",
     instructions: row.instructions,
     knowledge: row.knowledge ?? "",
+    // Rows from before tuning have none of these columns yet.
+    rules: row.rules ?? "",
+    examples: mapAgentExamples(row.examples),
+    creativity: oneOf(row.creativity, CREATIVITY_LEVELS, "balanced"),
+    doubleCheck: row.double_check === true,
     specialty: oneOf(row.specialty, SPECIALTIES, "assistant"),
     responseStyle: oneOf(row.response_style, RESPONSE_STYLES, "balanced"),
     // Rows from before automatic routing have no mode and keep their chosen model.
@@ -331,6 +354,47 @@ export function mapAgent(row: Tables<"ai_agents">): Agent {
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+/** A tasks row or the JSON a task function returns. */
+export function mapTask(value: unknown): Task | null {
+  if (!isObject(value) || !str(value.id) || !str(value.workspace_id) || !str(value.title)) return null;
+  const createdAt = str(value.created_at) ?? new Date().toISOString();
+  return {
+    id: value.id as string,
+    workspaceId: value.workspace_id as string,
+    number: num(value.number),
+    title: value.title as string,
+    description: str(value.description) ?? "",
+    status: oneOf(value.status, TASK_STATUSES, "todo"),
+    priority: oneOf(value.priority, TASK_PRIORITIES, "none"),
+    assigneeId: str(value.assignee_id),
+    agentId: str(value.agent_id),
+    dueOn: str(value.due_on)?.slice(0, 10) ?? null,
+    conversationId: str(value.conversation_id),
+    messageId: str(value.message_id),
+    createdBy: str(value.created_by),
+    createdByAgent: str(value.created_by_agent),
+    completedAt: str(value.completed_at),
+    createdAt,
+    updatedAt: str(value.updated_at) ?? createdAt,
+    version: typeof value.version === "number" ? value.version : 1,
+  };
+}
+
+export function mapIntegration(value: unknown): Integration | null {
+  if (!isObject(value) || !str(value.id) || value.provider !== "github") return null;
+  const settings = isObject(value.settings) ? value.settings : {};
+  return {
+    id: value.id as string,
+    workspaceId: str(value.workspace_id) ?? "",
+    provider: "github",
+    accountLogin: str(value.account_login) ?? "",
+    accountType: str(value.account_type) ?? "",
+    defaultRepo: str(settings.default_repo),
+    connectedBy: str(value.connected_by),
+    createdAt: str(value.created_at) ?? new Date(0).toISOString(),
   };
 }
 

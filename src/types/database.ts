@@ -301,6 +301,10 @@ export type Database = {
           response_style: string;
           knowledge: string;
           model_mode: string;
+          rules: string;
+          examples: Json;
+          creativity: string;
+          double_check: boolean;
           visibility: "workspace" | "private";
           archived_at: string | null;
           created_at: string;
@@ -322,6 +326,10 @@ export type Database = {
           response_style?: string;
           knowledge?: string;
           model_mode?: string;
+          rules?: string;
+          examples?: Json;
+          creativity?: string;
+          double_check?: boolean;
           visibility?: "workspace" | "private";
         };
         Update: {
@@ -338,6 +346,10 @@ export type Database = {
           response_style?: string;
           knowledge?: string;
           model_mode?: string;
+          rules?: string;
+          examples?: Json;
+          creativity?: string;
+          double_check?: boolean;
           visibility?: "workspace" | "private";
           archived_at?: string | null;
         };
@@ -396,6 +408,49 @@ export type Database = {
           workspace_id: string | null;
           note: string | null;
           created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      tasks: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          number: number;
+          title: string;
+          description: string;
+          status: string;
+          priority: string;
+          assignee_id: string | null;
+          agent_id: string | null;
+          due_on: string | null;
+          conversation_id: string | null;
+          message_id: string | null;
+          created_by: string | null;
+          created_by_agent: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+          version: number;
+        };
+        /** Written only through create_task, update_task, delete_task and ai_save_task. */
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      workspace_integrations: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          provider: "github";
+          external_id: string;
+          account_login: string;
+          account_type: string;
+          settings: Json;
+          connected_by: string | null;
+          created_at: string;
+          updated_at: string;
         };
         Insert: never;
         Update: never;
@@ -601,6 +656,41 @@ export type Database = {
       delete_push_subscription: {
         Args: { p_endpoint: string };
         Returns: undefined;
+      };
+      create_task: {
+        Args: { p_workspace_id: string; p_fields: Json };
+        Returns: Json;
+      };
+      update_task: {
+        Args: { p_task_id: string; p_fields: Json };
+        Returns: Json;
+      };
+      delete_task: {
+        Args: { p_task_id: string };
+        Returns: boolean;
+      };
+      ai_save_task: {
+        Args: { p_user_id: string; p_agent_id: string; p_task_id: string | null; p_workspace_id: string | null; p_fields: Json };
+        Returns: Json;
+      };
+      connect_workspace_integration: {
+        Args: {
+          p_user_id: string;
+          p_workspace_id: string;
+          p_provider: string;
+          p_external_id: string;
+          p_account_login: string;
+          p_account_type: string;
+        };
+        Returns: Json;
+      };
+      disconnect_workspace_integration: {
+        Args: { p_workspace_id: string; p_provider: string };
+        Returns: boolean;
+      };
+      set_integration_default_repo: {
+        Args: { p_workspace_id: string; p_provider: string; p_repo: string | null };
+        Returns: boolean;
       };
       health_check: {
         Args: NoArgs;

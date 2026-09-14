@@ -1,5 +1,7 @@
 "use client";
 
+import { TaskDialog } from "@/features/tasks/components/task-dialog";
+
 import { CommandPalette } from "./command-palette";
 import { InviteDialog } from "./invite-dialog";
 import { PeoplePickerDialog } from "./people-picker-dialog";
@@ -21,6 +23,12 @@ export function WorkspaceDialogs() {
       />
       <InviteDialog open={dialog?.name === "invite"} onOpenChange={onOpenChange} />
       <CommandPalette open={dialog?.name === "palette"} onOpenChange={onOpenChange} />
+      <TaskDialog
+        open={dialog?.name === "task"}
+        onOpenChange={onOpenChange}
+        taskId={dialog?.name === "task" ? dialog.taskId : undefined}
+        draft={dialog?.name === "task" ? dialog.draft : undefined}
+      />
     </>
   );
 }

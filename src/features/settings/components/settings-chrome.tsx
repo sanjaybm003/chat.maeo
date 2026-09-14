@@ -14,6 +14,7 @@ const SECTIONS: Array<{ key: SectionKey; label: string }> = [
   { key: "preferences", label: "Preferences" },
   { key: "workspace", label: "Workspace" },
   { key: "ai", label: "AI credits" },
+  { key: "integrations", label: "Connected apps" },
   { key: "account", label: "Account" },
 ];
 

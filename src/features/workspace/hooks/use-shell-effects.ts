@@ -5,7 +5,7 @@ import { useEffect } from "react";
 
 import { LAST_WORKSPACE_COOKIE } from "@/lib/constants";
 
-import { useWorkspace } from "../store/workspace-provider";
+import { useWorkspace, useWorkspaceStore } from "../store/workspace-provider";
 
 /** "(3) Priya · maeosan" — unread count first, where it's visible in the tab. */
 export function useUnreadTitle() {
@@ -34,7 +34,18 @@ export function useRememberWorkspace() {
   }, [slug]);
 }
 
+/** Typing somewhere, or working inside a dialog or menu: single-key shortcuts stay out of the way. */
+function isBusyTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) ||
+    target.closest("[role=dialog], [role=menu], [role=listbox]") !== null
+  );
+}
+
 export function useGlobalShortcuts() {
+  const store = useWorkspaceStore();
   const openDialog = useWorkspace((state) => state.openDialog);
 
   useEffect(() => {
@@ -42,9 +53,18 @@ export function useGlobalShortcuts() {
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
         openDialog({ name: "palette" });
+        return;
+      }
+
+      // "T" starts a task from anywhere, linked to the chat that's open.
+      if (event.key.toLowerCase() === "t" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat && !isBusyTarget(event.target)) {
+        const { tasksReady, dialog, activeConversationId } = store.getState();
+        if (!tasksReady || dialog) return;
+        event.preventDefault();
+        openDialog({ name: "task", draft: activeConversationId ? { conversationId: activeConversationId } : {} });
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openDialog]);
+  }, [openDialog, store]);
 }

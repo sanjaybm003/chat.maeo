@@ -9,6 +9,7 @@ import { LocalTime } from "@/components/ui/local-time";
 import { Spinner } from "@/components/ui/spinner";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { AgentIntro } from "@/features/ai/components/agent-intro";
+import { TaskCard } from "@/features/tasks/components/task-card";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
 import { cn, nameOf } from "@/lib/utils";
@@ -229,6 +230,9 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
               );
             }
             if (row.type === "system") {
+              if (row.message.meta.event === "task_created" || row.message.meta.event === "task_completed") {
+                return <TaskCard key={row.key} message={row.message} />;
+              }
               const agentId = row.message.meta.agent_id;
               return (
                 <p key={row.key} className="my-3 flex items-center justify-center gap-2 text-center text-[12.5px] text-ink-3">

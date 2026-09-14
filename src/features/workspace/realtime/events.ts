@@ -31,6 +31,11 @@ export const conversationRefSchema = z.object({ conversation_id: id }).transform
 export const workspaceRefSchema = z.object({ workspace_id: id }).transform((value) => value.workspace_id);
 export const userRefSchema = z.object({ user_id: id }).transform((value) => value.user_id);
 export const agentRefSchema = z.object({ agent_id: id }).transform((value) => value.agent_id);
+export const taskRefSchema = z.object({ task_id: id }).transform((value) => value.task_id);
+
+export const taskAssignedSchema = z
+  .object({ task_id: id, by: id })
+  .transform((value) => ({ taskId: value.task_id, by: value.by }));
 
 export const typingEventSchema = z
   .object({ user_id: id, typing: z.boolean().optional() })

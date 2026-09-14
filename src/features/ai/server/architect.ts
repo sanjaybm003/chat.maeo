@@ -36,7 +36,9 @@ What an agent in maeosan is:
   - history: read older messages in the same conversation.
   - search: search messages from other chats, limited to what everyone in the current chat can already see.
   - directory: list the workspace's members with their titles and roles.
-  - web: search the web. Include it only when the job needs current information from outside the team.
+  - web: search the web and read pages. Include it only when the job needs current information from outside the team.
+  - tasks: check, create and update the team's tasks. Include it for agents that plan, coordinate or follow up on work.
+  - github: read code in the workspace's connected GitHub repositories and open pull requests. Include it only for engineering agents that should work on code.
 
 How to fill each field:
 - specialty: the kind of work that fits best. assistant for everyday help; research for finding and verifying facts; writing for drafting and editing; analysis for numbers, options and trade-offs; planning for turning discussion into plans and next steps; support for helping people solve problems; engineering for code and technical questions. Each specialty comes with a proven working method, so don't restate generic method in the instructions.

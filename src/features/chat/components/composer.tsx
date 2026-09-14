@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEv
 import { toast } from "sonner";
 
 import { IconButton } from "@/components/ui/icon-button";
-import { IconArrowUp, IconClose, IconPaperclip, IconReply, IconSpark } from "@/components/ui/icons";
+import { IconArrowUp, IconClose, IconPaperclip, IconReply, IconSpark, IconTasks } from "@/components/ui/icons";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { AgentPanel } from "@/features/ai/components/agent-panel";
 import { matchAgents, MentionMenu } from "@/features/ai/components/mention-menu";
@@ -14,9 +14,14 @@ import { activeMentionQuery, insertMention } from "@/features/ai/mentions";
 import { AI_MODELS, findModel } from "@/features/ai/models";
 import { routeModel } from "@/features/ai/router";
 import { agentsToWake } from "@/features/ai/wake";
+import { useTaskActions } from "@/features/tasks/hooks/use-task-actions";
+import { isoDate } from "@/features/tasks/lib/dates";
+import { parseQuickTask, TASK_COMMAND, type QuickTask } from "@/features/tasks/lib/quick-task";
+import { describeDue, TASK_PRIORITY_META } from "@/features/tasks/lib/task-meta";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
 import { personColorStyle } from "@/lib/colors";
 import { MAX_MESSAGE_LENGTH } from "@/lib/constants";
+import { getErrorMessage } from "@/lib/errors";
 import { usePreferences } from "@/lib/preferences";
 import { cn, firstNameOf, joinNames, nameOf } from "@/lib/utils";
 import type { Agent, Conversation } from "@/types/domain";
@@ -48,6 +53,10 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   const agentPanel = useWorkspace((state) => state.agentPanel);
   const openAgentPanel = useWorkspace((state) => state.openAgentPanel);
   const closeAgentPanel = useWorkspace((state) => state.closeAgentPanel);
+  const tasksReady = useWorkspace((state) => state.tasksReady);
+  const openDialog = useWorkspace((state) => state.openDialog);
+  const taskActions = useTaskActions();
+  const [creatingTask, setCreatingTask] = useState(false);
   const replyToId = useWorkspace((state) => state.replyTargets[conversationId]);
   const replyTo = useWorkspace((state) =>
     replyToId ? (state.threads[conversationId]?.messages.find((message) => message.id === replyToId) ?? null) : null,
@@ -70,13 +79,20 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   const hasContent = text.trim().length > 0 || readyAttachments.length > 0;
   const canSend = hasContent && !uploading && !tooLong;
   const command = aiReady ? AGENT_COMMAND.exec(text.trim()) : null;
+  // "/task Fix the invoice @sam friday !high" makes a task right here.
+  const taskCommand = tasksReady ? TASK_COMMAND.exec(text.trim()) : null;
+  const taskText = taskCommand ? (taskCommand[1] ?? "") : null;
+  const quickTask = useMemo(
+    () => (taskText === null ? null : parseQuickTask(taskText, { members: Object.values(members), agents: Object.values(agents) })),
+    [taskText, members, agents],
+  );
 
   // "@que" at the caret opens a picker of agents; Escape dismisses it for that mention only.
   const mention = aiReady && !panelOpen ? activeMentionQuery(text, caret) : null;
   const suggestions = mention && mention.start !== dismissedMentionAt ? matchAgents(agents, mention.query) : [];
   const mentionOpen = suggestions.length > 0;
   const activeMention = Math.min(mentionIndex, Math.max(suggestions.length - 1, 0));
-  const woken = aiReady && text.trim() && !command ? agentsToWake(text, conversation, agents, replyTo) : [];
+  const woken = aiReady && text.trim() && !command && !taskCommand ? agentsToWake(text, conversation, agents, replyTo) : [];
   const lead = woken[0];
   const autoPick = lead
     ? routeModel({
@@ -140,7 +156,54 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
     focusAt(before.length + spacer.length + token.length);
   }
 
+  async function createQuickTask(quick: QuickTask) {
+    if (creatingTask) return;
+    if (!quick.title) {
+      openDialog({ name: "task", draft: { conversationId } });
+      updateText("", 0);
+      return;
+    }
+    setCreatingTask(true);
+    try {
+      await taskActions.create({
+        title: quick.title.slice(0, 200),
+        priority: quick.priority ?? "none",
+        dueOn: quick.dueOn,
+        assigneeId: quick.assignee?.kind === "person" ? quick.assignee.id : null,
+        agentId: quick.assignee?.kind === "agent" ? quick.assignee.id : null,
+        conversationId,
+      });
+      updateText("", 0);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Couldn't create the task."));
+    } finally {
+      setCreatingTask(false);
+    }
+  }
+
+  function taskHint(quick: QuickTask) {
+    if (!quick.title) return "enter to open a new task";
+    if (quick.unknownMention) return `@${quick.unknownMention} isn’t in this workspace · enter to create it unassigned`;
+    const parts = ["enter to create a task"];
+    if (quick.assignee) {
+      const name =
+        quick.assignee.kind === "agent"
+          ? (agents[quick.assignee.id]?.name ?? "an agent")
+          : quick.assignee.id === me.id
+            ? "you"
+            : firstNameOf(members[quick.assignee.id]);
+      parts.push(`for ${name}`);
+    }
+    if (quick.dueOn) parts.push(`due ${describeDue(quick.dueOn, isoDate(new Date())).label.toLowerCase()}`);
+    if (quick.priority) parts.push(TASK_PRIORITY_META[quick.priority].label.toLowerCase());
+    return parts.join(" · ");
+  }
+
   function submit() {
+    if (quickTask) {
+      void createQuickTask(quickTask);
+      return;
+    }
     if (command) {
       openAgentPanel(conversationId, command[1]?.trim());
       updateText("", 0);
@@ -334,21 +397,29 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
             <button
               type="button"
               onClick={submit}
-              disabled={!canSend && !command}
+              disabled={(!canSend && !command && !quickTask) || creatingTask}
               style={personColorStyle(me.color)}
               className={cn(
                 "flex size-9 shrink-0 items-center justify-center rounded-full transition-[background-color,transform] duration-150",
-                canSend || command ? "bg-person text-person-on hover:scale-105 active:scale-95" : "bg-paper-2 text-ink-4",
+                canSend || command || quickTask ? "bg-person text-person-on hover:scale-105 active:scale-95" : "bg-paper-2 text-ink-4",
               )}
-              aria-label={command ? "Create an agent" : "Send message"}
+              aria-label={quickTask ? "Create task" : command ? "Create an agent" : "Send message"}
             >
-              {command ? <IconSpark size={18} strokeWidth={2} /> : <IconArrowUp size={18} strokeWidth={2} />}
+              {quickTask ? (
+                <IconTasks size={18} strokeWidth={2} />
+              ) : command ? (
+                <IconSpark size={18} strokeWidth={2} />
+              ) : (
+                <IconArrowUp size={18} strokeWidth={2} />
+              )}
             </button>
           </div>
         </div>
 
         <div className="mt-1.5 hidden h-4 items-center justify-between gap-3 px-3 font-mono text-[10.5px] text-ink-4 sm:flex">
-          {command ? (
+          {quickTask ? (
+            <span className={cn("min-w-0 truncate", quickTask.unknownMention ? "text-danger" : "text-ink-3")}>{taskHint(quickTask)}</span>
+          ) : command ? (
             <span className="text-ink-3">enter to design an agent{command[1]?.trim() ? " from your description" : ""}</span>
           ) : woken.length > 0 ? (
             <span className="flex min-w-0 items-center gap-1.5 text-ink-3">
@@ -368,6 +439,7 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
           ) : (
             <span>
               {preferences.enterToSend ? "enter to send · shift + enter for a new line" : "ctrl + enter to send"}
+              {tasksReady ? " · /task to add a task" : ""}
               {aiReady ? " · /agent to create an agent" : ""}
             </span>
           )}

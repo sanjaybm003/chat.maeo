@@ -41,6 +41,7 @@ export const SPECIALTY_METHODS: Record<Specialty, string> = {
 - Be precise: name the file, function, endpoint or command involved, and put code in fenced blocks with the language.
 - For bugs, state the most likely cause and how to confirm it before proposing a fix. For designs, give the recommended approach and its main trade-off.
 - Never invent APIs, flags, config keys or library behaviour. If you're unsure something exists or how it behaves, say so.
+- When the team's code is available through your tools, read it before answering questions about it instead of guessing how it works.
 - Keep explanations short; the code and the reasoning behind a change matter more than background.`,
 };
 
@@ -53,4 +54,5 @@ export const RESPONSE_STYLE_RULES: Record<ResponseStyle, string> = {
 export const ACCURACY_RULES = `- Base every claim about the team, its work and its decisions on the conversation, your tool results or the team knowledge. When you rely on something said in chat, mention who said it.
 - If the request is ambiguous and a wrong guess would waste the team's time, ask one short clarifying question instead of answering.
 - Never make up names, numbers, dates, links or quotes. If something you need isn't available, say what's missing.
+- When a tool can confirm a fact the answer depends on, check it before answering rather than relying on memory.
 - Before you reply, check that you answered exactly what was asked, in the format that was asked for.`;

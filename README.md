@@ -28,6 +28,17 @@ Built with Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4 and Sup
 - ⌘K / Ctrl K palette to jump to people and chats and search message history
 - Mute per conversation, sound and desktop notifications, unread count in the tab title
 
+**Tasks**
+- Press T anywhere, type `/task Send the invoice @sam friday !high` in a chat, or turn any message into a task
+- Numbered per workspace (T-12), with status, priority, due dates, and a teammate or an agent doing the work
+- Task cards in chat stay live: tick them off or edit them right there, or on their own page
+
+**AI agents**
+- Describe an agent in plain words, add it to any chat, or talk to it one-to-one; replies use each person's AI credits
+- Automatic model routing, web search with sources, and tools to read the conversation, search the workspace and manage tasks
+- Tuning per agent: rules it must keep, example replies to learn from, creativity, and an optional double-check of every answer
+- GitHub: agents read code and open pull requests for the team to review
+
 **Design**
 - Warm paper and ink with eight flat person colors. Your color tints your avatar, bubbles and reactions
 - Bricolage Grotesque, Instrument Sans and IBM Plex Mono
@@ -143,7 +154,18 @@ These links verify with a token hash, so they work even when opened in a differe
 
 In **Project Settings → Realtime**, turn off **Allow public access**. maeosan only uses private channels, and this makes the database authorization mandatory.
 
-### 6. Run it
+### 6. Connect GitHub (optional)
+
+Agents can read code and open pull requests once a workspace connects GitHub. Register one GitHub App for your deployment at **github.com/settings/apps/new**:
+
+- **Callback URL:** `https://your-domain/api/integrations/github/callback`, and tick **Request user authorization (OAuth) during installation**
+- **Webhook:** off
+- **Repository permissions:** Contents *Read and write*, Pull requests *Read and write*, Metadata *Read-only*
+- **Where can this app be installed:** *Any account*, so teams can install it on their own organizations
+
+Generate a client secret and a private key, then set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (from `github.com/apps/<slug>`), `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` and `GITHUB_APP_PRIVATE_KEY` (the whole `.pem`). Workspace admins connect from **Settings → Connected apps**. Agents only push to their own branches and open pull requests; nothing is merged without a person.
+
+### 7. Run it
 
 ```bash
 npm install

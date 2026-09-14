@@ -114,5 +114,22 @@ export function validateEnv(env: Record<string, string | undefined> = process.en
     warnings.push("BEDROCK_ENDPOINT must be mantle or runtime; leave it unset to pick automatically.");
   }
 
+  // The GitHub App workspaces connect with. All five settings work together.
+  const githubSettings = ["GITHUB_APP_ID", "GITHUB_APP_SLUG", "GITHUB_APP_CLIENT_ID", "GITHUB_APP_CLIENT_SECRET", "GITHUB_APP_PRIVATE_KEY"];
+  const githubMissing = githubSettings.filter((name) => !blanksRemoved[name]);
+  if (githubMissing.length > 0 && githubMissing.length < githubSettings.length) {
+    warnings.push(`GitHub is partly configured: also set ${githubMissing.join(", ")} so workspaces can connect GitHub.`);
+  }
+  const githubKey = blanksRemoved.GITHUB_APP_PRIVATE_KEY;
+  if (githubKey && !/-----BEGIN (?:RSA )?PRIVATE KEY-----/.test(githubKey.replace(/\\n/g, "\n"))) {
+    warnings.push(
+      "GITHUB_APP_PRIVATE_KEY doesn't look like a private key. Paste the whole .pem file from the GitHub App settings, including its BEGIN and END lines.",
+    );
+  }
+  const githubSlug = blanksRemoved.GITHUB_APP_SLUG;
+  if (githubSlug && !/^[a-z0-9-]+$/.test(githubSlug)) {
+    warnings.push("GITHUB_APP_SLUG is the app's name in its address, github.com/apps/<slug>, like maeosan-acme.");
+  }
+
   return { errors, warnings };
 }

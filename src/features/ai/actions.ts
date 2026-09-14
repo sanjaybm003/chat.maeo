@@ -4,9 +4,10 @@ import { fail, ok, toFieldErrors, type ActionResult } from "@/lib/action-result"
 import { getErrorMessage } from "@/lib/errors";
 import { mapAgent } from "@/lib/mappers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Agent } from "@/types/domain";
+import type { Json } from "@/types/database";
+import type { Agent, AgentExample } from "@/types/domain";
 
-import { agentInputSchema, type AgentInput } from "./agent-spec";
+import { agentExampleSchema, agentInputSchema, MAX_EXAMPLES, type AgentInput } from "./agent-spec";
 import { findModel } from "./models";
 import { configuredModels } from "./server/env";
 
@@ -19,7 +20,7 @@ function validate(input: AgentInput): { ok: true; data: ParsedAgent } | { ok: fa
   }
 
   const available = configuredModels();
-  // The served copy knows host limits, such as no web search for Claude on Bedrock.
+  // The served copy knows host limits, such as no built-in web search for Claude on Bedrock.
   let model = available.find((item) => item.id === parsed.data.model) ?? findModel(parsed.data.model);
 
   if (parsed.data.modelMode === "fixed") {
@@ -34,10 +35,8 @@ function validate(input: AgentInput): { ok: true; data: ParsedAgent } | { ok: fa
     model = available[0] ?? findModel("claude-sonnet-5");
   }
 
-  // In fixed mode web search only works on models that host it; auto routing picks one when needed.
-  const tools =
-    parsed.data.modelMode === "fixed" && !model?.webSearch ? parsed.data.tools.filter((tool) => tool !== "web") : parsed.data.tools;
-  return { ok: true, data: { ...parsed.data, model: model?.id ?? parsed.data.model, tools } };
+  // Every model can use the web now: through its own search, or through maeosan's search and page reader.
+  return { ok: true, data: { ...parsed.data, model: model?.id ?? parsed.data.model } };
 }
 
 function editableFields(data: ParsedAgent) {
@@ -47,6 +46,10 @@ function editableFields(data: ParsedAgent) {
     tagline: data.tagline,
     instructions: data.instructions,
     knowledge: data.knowledge,
+    rules: data.rules,
+    examples: data.examples as unknown as Json,
+    creativity: data.creativity,
+    double_check: data.doubleCheck,
     specialty: data.specialty,
     response_style: data.responseStyle,
     model_mode: data.modelMode,
@@ -57,6 +60,20 @@ function editableFields(data: ParsedAgent) {
     glyph: data.glyph,
     visibility: data.visibility,
   };
+}
+
+type AgentFields = ReturnType<typeof editableFields>;
+
+/** A database without the tasks-and-tuning update has no tuning columns and knows only the original tools. */
+const isMissingColumn = (error: { code?: string } | null) => error?.code === "PGRST204" || error?.code === "42703";
+
+function withoutTuning(fields: AgentFields) {
+  const legacy: Partial<AgentFields> = { ...fields, tools: fields.tools.filter((tool) => tool !== "tasks" && tool !== "github") };
+  delete legacy.rules;
+  delete legacy.examples;
+  delete legacy.creativity;
+  delete legacy.double_check;
+  return legacy;
 }
 
 function saveError(error: { code?: string; message: string }, handle: string): ActionResult<never> {
@@ -73,13 +90,16 @@ export async function createAgent(input: AgentInput): Promise<ActionResult<Agent
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return fail("Your session ended. Sign in again.");
 
-  const { data, error } = await supabase
-    .from("ai_agents")
-    .insert({ workspace_id: checked.data.workspaceId, created_by: auth.user.id, ...editableFields(checked.data) })
-    .select("*")
-    .single();
-  if (error) return saveError(error, checked.data.handle);
-  return ok(mapAgent(data));
+  const insert = (fields: Partial<AgentFields>) =>
+    supabase
+      .from("ai_agents")
+      .insert({ workspace_id: checked.data.workspaceId, created_by: auth.user!.id, ...(fields as AgentFields) })
+      .select("*")
+      .single();
+  let result = await insert(editableFields(checked.data));
+  if (isMissingColumn(result.error)) result = await insert(withoutTuning(editableFields(checked.data)));
+  if (result.error) return saveError(result.error, checked.data.handle);
+  return ok(mapAgent(result.data));
 }
 
 export async function updateAgent(agentId: string, input: AgentInput): Promise<ActionResult<Agent>> {
@@ -87,17 +107,20 @@ export async function updateAgent(agentId: string, input: AgentInput): Promise<A
   if (!checked.ok) return checked.result;
 
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("ai_agents")
-    .update(editableFields(checked.data))
-    .eq("id", agentId)
-    .eq("workspace_id", checked.data.workspaceId)
-    .is("archived_at", null)
-    .select("*")
-    .maybeSingle();
-  if (error) return saveError(error, checked.data.handle);
-  if (!data) return fail("Only the person who made this agent, or an admin, can edit it.");
-  return ok(mapAgent(data));
+  const update = (fields: Partial<AgentFields>) =>
+    supabase
+      .from("ai_agents")
+      .update(fields)
+      .eq("id", agentId)
+      .eq("workspace_id", checked.data.workspaceId)
+      .is("archived_at", null)
+      .select("*")
+      .maybeSingle();
+  let result = await update(editableFields(checked.data));
+  if (isMissingColumn(result.error)) result = await update(withoutTuning(editableFields(checked.data)));
+  if (result.error) return saveError(result.error, checked.data.handle);
+  if (!result.data) return fail("Only the person who made this agent, or an admin, can edit it.");
+  return ok(mapAgent(result.data));
 }
 
 export async function archiveAgent(agentId: string): Promise<ActionResult<Agent>> {
@@ -111,5 +134,30 @@ export async function archiveAgent(agentId: string): Promise<ActionResult<Agent>
     .maybeSingle();
   if (error) return fail(getErrorMessage(error, "Couldn't archive the agent."));
   if (!data) return fail("Only the person who made this agent, or an admin, can archive it.");
+  return ok(mapAgent(data));
+}
+
+/**
+ * Keeps a reply the team liked as a worked example, so the agent answers
+ * similar messages the same way. The newest examples are kept.
+ */
+export async function addAgentExample(agentId: string, example: AgentExample): Promise<ActionResult<Agent>> {
+  const parsed = agentExampleSchema.safeParse(example);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "That example can't be saved.");
+
+  const supabase = await createSupabaseServerClient();
+  const { data: row, error: readError } = await supabase.from("ai_agents").select("*").eq("id", agentId).is("archived_at", null).maybeSingle();
+  if (readError) return fail(getErrorMessage(readError, "Couldn't save the example."));
+  if (!row) return fail("That agent isn’t available.");
+
+  const examples = [...mapAgent(row).examples.filter((item) => item.prompt !== parsed.data.prompt), parsed.data].slice(-MAX_EXAMPLES);
+  const { data, error } = await supabase
+    .from("ai_agents")
+    .update({ examples: examples as unknown as Json })
+    .eq("id", agentId)
+    .select("*")
+    .maybeSingle();
+  if (error) return fail(getErrorMessage(error, "Couldn't save the example."));
+  if (!data) return fail("Only the person who made this agent, or an admin, can tune it.");
   return ok(mapAgent(data));
 }

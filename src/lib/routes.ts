@@ -20,10 +20,12 @@ export const routes = {
   newAgent: (slug: string, prompt?: string) =>
     prompt ? `/w/${slug}/agents/new?prompt=${encodeURIComponent(prompt)}` : `/w/${slug}/agents/new`,
   agent: (slug: string, agentId: string) => `/w/${slug}/agents/${agentId}`,
+  tasks: (slug: string) => `/w/${slug}/tasks`,
+  task: (slug: string, number: number) => `/w/${slug}/tasks/${number}`,
   settings: (slug: string, section: SettingsSection = "profile") => `/w/${slug}/settings/${section}`,
 } as const;
 
-export type SettingsSection = "profile" | "preferences" | "workspace" | "ai" | "account";
+export type SettingsSection = "profile" | "preferences" | "workspace" | "ai" | "integrations" | "account";
 
 const PUBLIC_PREFIXES = ["/auth/", "/invite/", "/api/"];
 const PUBLIC_PATHS = new Set<string>([

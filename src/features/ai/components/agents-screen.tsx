@@ -31,6 +31,8 @@ const TOOL_CHIPS: Record<AgentToolId, string> = {
   search: "search",
   directory: "team",
   web: "web",
+  tasks: "tasks",
+  github: "github",
 };
 
 export function AgentsScreen() {

@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, FormError, SectionLabel } from "@/components/ui/field";
-import { IconArrowLeft, IconCheck, IconLock, IconWarning } from "@/components/ui/icons";
+import { IconArrowLeft, IconCheck, IconLock, IconPlus, IconTrash, IconWarning } from "@/components/ui/icons";
 import { Input, Textarea } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
@@ -21,11 +21,14 @@ import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import {
   AGENT_GLYPHS,
+  CREATIVITY_LEVELS,
   PERSON_COLORS,
   type Agent,
+  type AgentExample,
   type AgentGlyph,
   type AgentToolId,
   type AgentVisibility,
+  type Creativity,
   type ModelMode,
   type PersonColor,
   type ResponseStyle,
@@ -33,7 +36,18 @@ import {
 } from "@/types/domain";
 
 import { archiveAgent, createAgent, updateAgent } from "../actions";
-import { AGENT_TOOLS, MAX_KNOWLEDGE, MAX_STARTERS, toHandle, type AgentDraft, type AgentInput } from "../agent-spec";
+import {
+  AGENT_TOOLS,
+  MAX_EXAMPLE_PROMPT,
+  MAX_EXAMPLE_REPLY,
+  MAX_EXAMPLES,
+  MAX_KNOWLEDGE,
+  MAX_RULES,
+  MAX_STARTERS,
+  toHandle,
+  type AgentDraft,
+  type AgentInput,
+} from "../agent-spec";
 import { AiRequestError, draftAgent, openAgentConversation } from "../api";
 import { creditsForUsage, formatCredits, typicalReplyCredits } from "../credits";
 import { AI_MODELS, findModel, pickArchitectModel, PROVIDERS, recommendModel, TIER_LABELS, type AiModel, type ModelTier } from "../models";
@@ -51,6 +65,10 @@ interface FormState {
   tagline: string;
   instructions: string;
   knowledge: string;
+  rules: string;
+  examples: AgentExample[];
+  creativity: Creativity;
+  doubleCheck: boolean;
   specialty: Specialty;
   responseStyle: ResponseStyle;
   modelMode: ModelMode;
@@ -62,6 +80,12 @@ interface FormState {
   visibility: AgentVisibility;
 }
 
+const CREATIVITY_OPTIONS: Record<Creativity, { label: string; summary: string }> = {
+  precise: { label: "Precise", summary: "Sticks closely to the facts and the wording. Best for support, numbers and code." },
+  balanced: { label: "Balanced", summary: "The usual for its kind of work." },
+  creative: { label: "Creative", summary: "Freer with ideas and phrasing. Best for brainstorming and copy." },
+};
+
 function blankForm(model: string): FormState {
   const profile = SPECIALTY_PROFILES.assistant;
   return {
@@ -71,6 +95,10 @@ function blankForm(model: string): FormState {
     tagline: "",
     instructions: "",
     knowledge: "",
+    rules: "",
+    examples: [],
+    creativity: "balanced",
+    doubleCheck: false,
     specialty: profile.id,
     responseStyle: profile.style,
     modelMode: "auto",
@@ -90,6 +118,10 @@ const formFromAgent = (agent: Agent): FormState => ({
   tagline: agent.tagline,
   instructions: agent.instructions,
   knowledge: agent.knowledge,
+  rules: agent.rules,
+  examples: agent.examples,
+  creativity: agent.creativity,
+  doubleCheck: agent.doubleCheck,
   specialty: agent.specialty,
   responseStyle: agent.responseStyle,
   modelMode: agent.modelMode,
@@ -122,6 +154,12 @@ const toInput = (form: FormState, workspaceId: string): AgentInput => ({
   tagline: form.tagline,
   instructions: form.instructions,
   knowledge: form.knowledge,
+  rules: form.rules,
+  examples: form.examples
+    .map((example) => ({ prompt: example.prompt.trim(), reply: example.reply.trim() }))
+    .filter((example) => example.prompt && example.reply),
+  creativity: form.creativity,
+  doubleCheck: form.doubleCheck,
   specialty: form.specialty,
   responseStyle: form.responseStyle,
   modelMode: form.modelMode,
@@ -143,6 +181,8 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
   const aiReady = useWorkspace((state) => state.aiReady);
   const aiModels = useWorkspace((state) => state.aiModels);
   const aiWebSearch = useWorkspace((state) => state.aiWebSearch);
+  const tasksReady = useWorkspace((state) => state.tasksReady);
+  const githubConnected = useWorkspace((state) => state.integrations.some((item) => item.provider === "github"));
   const existing = useWorkspace((state) => (agentId ? state.agents[agentId] : undefined));
 
   const available = useMemo(() => AI_MODELS.filter((model) => aiModels.includes(model.id)), [aiModels]);
@@ -297,11 +337,11 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
     router.push(routes.agents(workspace.slug));
   }
 
-  const model = findModel(form.model);
   const architect = pickArchitectModel(available);
   const draftEstimate = architect ? creditsForUsage(architect, { inputTokens: 3000, outputTokens: 1400 }) : null;
   const starters = Array.from({ length: MAX_STARTERS }, (_, index) => form.starters[index] ?? "");
   const errors = save.fieldErrors;
+  const exampleError = Object.entries(errors).find(([key]) => key.startsWith("examples"))?.[1];
   const fixedUnavailable = form.modelMode === "fixed" && !available.some((item) => item.id === form.model);
 
   return (
@@ -565,6 +605,59 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
 
             <BuilderSection
               index={5}
+              title="Tuning"
+              description="Make it answer the way your team wants: how free it is with words, the rules it must keep, and replies to learn from."
+            >
+              <div className="flex flex-col gap-6">
+                <div>
+                  <p className="mb-2.5 text-[13px] font-medium text-ink-2">Creativity</p>
+                  <Segmented<Creativity>
+                    label="Creativity"
+                    value={form.creativity}
+                    onChange={(creativity) => patch({ creativity })}
+                    options={CREATIVITY_LEVELS.map((value) => ({ value, label: CREATIVITY_OPTIONS[value].label }))}
+                  />
+                  <p className="mt-2 text-[12.5px] text-ink-3">{CREATIVITY_OPTIONS[form.creativity].summary}</p>
+                </div>
+
+                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-[20px] border border-line bg-surface px-4 py-3.5">
+                  <span className="min-w-0">
+                    <span className="block text-[14px] font-medium text-ink">Double-check every answer</span>
+                    <span className="mt-0.5 block text-[12.5px] leading-relaxed text-ink-3">
+                      Before a reply is final, it’s checked against the conversation and what its tools found, and corrected if something doesn’t
+                      hold up. Uses a few more credits; worth it for research, numbers and code.
+                    </span>
+                  </span>
+                  <Switch checked={form.doubleCheck} onCheckedChange={(doubleCheck) => patch({ doubleCheck })} className="mt-0.5" />
+                </label>
+
+                <Field
+                  label="Rules"
+                  htmlFor="agent-rules"
+                  error={errors.rules}
+                  hint="One per line. They win over everything else, like “Always quote prices in INR” or “Never promise delivery dates.”"
+                  aside={
+                    <span className={cn("font-mono text-[11px]", form.rules.length > MAX_RULES ? "text-danger" : "text-ink-3")}>
+                      {form.rules.length.toLocaleString()} / 4,000
+                    </span>
+                  }
+                >
+                  <Textarea
+                    id="agent-rules"
+                    value={form.rules}
+                    onChange={(event) => patch({ rules: event.target.value })}
+                    rows={4}
+                    placeholder={"Always…\nNever…"}
+                    className="min-h-[110px] text-[14px]"
+                  />
+                </Field>
+
+                <ExamplesEditor examples={form.examples} onChange={(examples) => patch({ examples })} error={exampleError} />
+              </div>
+            </BuilderSection>
+
+            <BuilderSection
+              index={6}
               title="Model and replies"
               description="Every reply is paid from the credits of the person who asks. Auto keeps quick answers cheap and saves the strongest models for hard questions."
             >
@@ -608,26 +701,35 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
               </div>
             </BuilderSection>
 
-            <BuilderSection index={6} title="Tools" description="What it may look at while it works. Everything stays within what the people in the chat can already see.">
+            <BuilderSection
+              index={7}
+              title="Tools"
+              description="What it may look at and act on while it works. Reading stays within what the people in the chat can already see."
+            >
               <div className="divide-y divide-line overflow-hidden rounded-[20px] border border-line bg-surface">
                 {AGENT_TOOLS.map((tool) => {
-                  const unsupported = tool.id === "web" && (!aiWebSearch || (form.modelMode === "fixed" && !model?.webSearch));
-                  const checked = form.tools.includes(tool.id) && !unsupported;
+                  const checked = form.tools.includes(tool.id);
+                  const blocked = (tool.id === "tasks" && !tasksReady) || (tool.id === "github" && !githubConnected);
+                  const note =
+                    tool.id === "web" && !aiWebSearch
+                      ? "Reads links people share. Searching the web isn’t available right now."
+                      : tool.id === "tasks" && !tasksReady
+                        ? "Tasks aren’t switched on in this workspace yet."
+                        : tool.id === "github" && !githubConnected
+                          ? "Connect GitHub in Settings → Connected apps first."
+                          : tool.description;
                   return (
-                    <label key={tool.id} className={cn("flex items-center justify-between gap-4 px-4 py-3.5", unsupported ? "opacity-55" : "cursor-pointer")}>
+                    <label
+                      key={tool.id}
+                      className={cn("flex items-center justify-between gap-4 px-4 py-3.5", blocked && !checked ? "opacity-55" : "cursor-pointer")}
+                    >
                       <span className="min-w-0">
                         <span className="block text-[14px] font-medium text-ink">{tool.label}</span>
-                        <span className="block text-[12.5px] text-ink-3">
-                          {unsupported
-                            ? aiWebSearch
-                              ? "The chosen model can’t browse. Pick a Claude model or use Auto."
-                              : "Web search isn’t available right now."
-                            : tool.description}
-                        </span>
+                        <span className="block text-[12.5px] text-ink-3">{note}</span>
                       </span>
                       <Switch
                         checked={checked}
-                        disabled={unsupported}
+                        disabled={blocked && !checked}
                         onCheckedChange={(value) =>
                           patch({ tools: value ? [...form.tools, tool.id] : form.tools.filter((id) => id !== tool.id) })
                         }
@@ -638,7 +740,7 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
               </div>
             </BuilderSection>
 
-            <BuilderSection index={7} title="Conversation starters" description="Shown in its room as one-tap first messages. Optional.">
+            <BuilderSection index={8} title="Conversation starters" description="Shown in its room as one-tap first messages. Optional.">
               <div className="flex flex-col gap-2">
                 {starters.map((starter, index) => (
                   <Input
@@ -656,7 +758,7 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
               </div>
             </BuilderSection>
 
-            <BuilderSection index={8} title="Who can use it" description="Shared agents can also be added to any chat, where they work alongside everyone.">
+            <BuilderSection index={9} title="Who can use it" description="Shared agents can also be added to any chat, where they work alongside everyone.">
               <Segmented<AgentVisibility>
                 label="Who can use it"
                 value={form.visibility}
@@ -726,6 +828,76 @@ function BuilderSection({
       </div>
       {children}
     </section>
+  );
+}
+
+function ExamplesEditor({
+  examples,
+  onChange,
+  error,
+}: {
+  examples: AgentExample[];
+  onChange: (examples: AgentExample[]) => void;
+  error?: string;
+}) {
+  const update = (index: number, change: Partial<AgentExample>) =>
+    onChange(examples.map((example, position) => (position === index ? { ...example, ...change } : example)));
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-[13px] font-medium text-ink-2">Example replies</p>
+        <span className="font-mono text-[11px] text-ink-3">
+          {examples.length} / {MAX_EXAMPLES}
+        </span>
+      </div>
+      <p className="mb-3 mt-1 text-[12.5px] leading-relaxed text-ink-3">
+        A message and the reply you’d want. It matches their structure, length and tone. You can also keep a good reply from any chat with
+        “Save as an example” in its menu.
+      </p>
+      <div className="flex flex-col gap-3">
+        {examples.map((example, index) => (
+          <div key={index} className="rounded-[20px] border border-line bg-surface p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-mono text-[11px] text-ink-3">Example {index + 1}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove example ${index + 1}`}
+                onClick={() => onChange(examples.filter((_, position) => position !== index))}
+              >
+                <IconTrash size={15} />
+              </Button>
+            </div>
+            <Textarea
+              value={example.prompt}
+              onChange={(event) => update(index, { prompt: event.target.value })}
+              maxLength={MAX_EXAMPLE_PROMPT}
+              rows={2}
+              placeholder="A message someone sends"
+              aria-label={`Example ${index + 1}: the message`}
+              className="min-h-0 text-[14px]"
+            />
+            <Textarea
+              value={example.reply}
+              onChange={(event) => update(index, { reply: event.target.value })}
+              maxLength={MAX_EXAMPLE_REPLY}
+              rows={4}
+              placeholder="The reply you want"
+              aria-label={`Example ${index + 1}: the reply`}
+              className="mt-2 text-[14px]"
+            />
+          </div>
+        ))}
+      </div>
+      {examples.length < MAX_EXAMPLES ? (
+        <Button variant="secondary" size="sm" className="mt-3" onClick={() => onChange([...examples, { prompt: "", reply: "" }])}>
+          <IconPlus size={15} />
+          Add an example
+        </Button>
+      ) : null}
+      {error ? <p className="mt-2 text-[13px] text-danger">{error}</p> : null}
+    </div>
   );
 }
 

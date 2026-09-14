@@ -36,6 +36,8 @@ const TOOL_SHORT: Record<AgentToolId, string> = {
   search: "Workspace search",
   directory: "Team directory",
   web: "Web search",
+  tasks: "Tasks",
+  github: "GitHub",
 };
 
 interface AgentPanelProps {

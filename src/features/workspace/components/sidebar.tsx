@@ -6,10 +6,11 @@ import { useState, type ReactNode } from "react";
 
 import { SectionLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
-import { IconCompose, IconSearch, IconSliders, IconSpark, IconUserPlus, IconUsers } from "@/components/ui/icons";
+import { IconCompose, IconSearch, IconSliders, IconSpark, IconTasks, IconUserPlus, IconUsers } from "@/components/ui/icons";
 import { Kbd } from "@/components/ui/kbd";
 import { Segmented } from "@/components/ui/segmented";
 import { CreditsMeter } from "@/features/ai/components/credits-meter";
+import { isOpenTask } from "@/features/tasks/lib/task-meta";
 import { useIsMac } from "@/hooks/use-hydrated";
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,10 @@ export function Sidebar({ className }: { className?: string }) {
   const memberCount = useWorkspace((state) => Object.keys(state.members).length);
   const aiReady = useWorkspace((state) => state.aiReady);
   const agentCount = useWorkspace((state) => Object.values(state.agents).filter((agent) => !agent.archivedAt).length);
+  const tasksReady = useWorkspace((state) => state.tasksReady);
+  const myOpenTasks = useWorkspace(
+    (state) => Object.values(state.tasks).filter((task) => task.assigneeId === state.me.id && isOpenTask(task)).length,
+  );
   const unreadChats = useWorkspace(
     (state) => Object.values(state.conversations).filter((item) => item.unreadCount > 0).length,
   );
@@ -78,6 +83,15 @@ export function Sidebar({ className }: { className?: string }) {
       <ConversationList filter={filter} className="min-h-0 flex-1" />
 
       <nav className="flex flex-col gap-0.5 border-t border-line p-2" aria-label="Workspace">
+        {tasksReady ? (
+          <NavItem
+            href={routes.tasks(slug)}
+            active={pathname.startsWith(routes.tasks(slug))}
+            icon={<IconTasks />}
+            label="Tasks"
+            meta={myOpenTasks > 0 ? String(myOpenTasks) : undefined}
+          />
+        ) : null}
         {aiReady ? (
           <NavItem
             href={routes.agents(slug)}

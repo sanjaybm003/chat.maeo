@@ -5,12 +5,15 @@ import type {
   AgentStream,
   Conversation,
   CreditAccount,
+  Integration,
   Member,
   Message,
   PendingInvitation,
   PresenceStatus,
   Profile,
   Reaction,
+  Task,
+  TaskDraft,
   Workspace,
   WorkspaceRole,
   WorkspaceSummary,
@@ -27,6 +30,19 @@ export interface AiBootstrap {
   credits: CreditAccount | null;
 }
 
+export interface TasksBootstrap {
+  /** False until the tasks migration has been applied to the database. */
+  ready: boolean;
+  /** Open tasks and anything finished in the last month. */
+  items: Task[];
+}
+
+export interface IntegrationsBootstrap {
+  /** Whether this server has a GitHub App to connect with. */
+  githubAvailable: boolean;
+  items: Integration[];
+}
+
 export interface WorkspaceBootstrap {
   me: Profile;
   workspace: Workspace;
@@ -36,6 +52,8 @@ export interface WorkspaceBootstrap {
   conversations: Conversation[];
   pendingInvitations: PendingInvitation[];
   ai: AiBootstrap;
+  tasks: TasksBootstrap;
+  integrations: IntegrationsBootstrap;
 }
 
 /** Position in a conversation's change feed: the newest (updated_at, id) seen from the server. */
@@ -61,7 +79,9 @@ export type DialogState =
   | { name: "new-chat" }
   | { name: "invite" }
   | { name: "palette" }
-  | { name: "add-people"; conversationId: string };
+  | { name: "add-people"; conversationId: string }
+  /** A new task when there's no taskId, starting from the draft; otherwise that task. */
+  | { name: "task"; taskId?: string; draft?: TaskDraft };
 
 export interface PresenceEntry {
   userId: string;
@@ -169,7 +189,31 @@ export interface AiSlice {
   applyAgentStream: (conversationId: string, messageId: string, stream: AgentStream) => void;
 }
 
-export type WorkspaceStoreState = DirectorySlice & ConversationsSlice & ThreadsSlice & PresenceSlice & UiSlice & AiSlice;
+export interface TasksSlice {
+  tasksReady: boolean;
+  tasks: Record<string, Task>;
+
+  setTasks: (tasks: Task[]) => void;
+  /** Keeps the newer copy when two versions of a task cross paths. */
+  upsertTask: (task: Task) => void;
+  removeTask: (taskId: string) => void;
+}
+
+export interface IntegrationsSlice {
+  githubAvailable: boolean;
+  integrations: Integration[];
+
+  setIntegrations: (integrations: Integration[]) => void;
+}
+
+export type WorkspaceStoreState = DirectorySlice &
+  ConversationsSlice &
+  ThreadsSlice &
+  PresenceSlice &
+  UiSlice &
+  AiSlice &
+  TasksSlice &
+  IntegrationsSlice;
 
 export type SetState = StoreApi<WorkspaceStoreState>["setState"];
 export type GetState = StoreApi<WorkspaceStoreState>["getState"];

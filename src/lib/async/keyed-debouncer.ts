@@ -23,6 +23,12 @@ export class KeyedDebouncer<Key> {
     );
   }
 
+  cancel(key: Key) {
+    const existing = this.timers.get(key);
+    if (existing) clearTimeout(existing);
+    this.timers.delete(key);
+  }
+
   get pending() {
     return this.timers.size;
   }

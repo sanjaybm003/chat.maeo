@@ -6,7 +6,6 @@ import { pluralize } from "@/lib/utils";
 import type { Json } from "@/types/database";
 import type { AgentRunStep } from "@/types/domain";
 
-import type { AgentToolId } from "../agent-spec";
 import { creditsForUsage, estimateReservation, estimateTokens, type TokenUsage } from "../credits";
 import type { AiModel } from "../models";
 import { fallbackModel } from "../router";
@@ -16,18 +15,23 @@ import { buildReplyContext, type AgentRow } from "./context";
 import type { AdminClient } from "./directory";
 import { AgentRunError, describeFailure, friendlyRunError, RunCancelledError, RunDeadlineError } from "./errors";
 import { configuredModels, isProviderConfigured } from "./env";
+import { loadGithubAccess } from "./github-tools";
 import { providerClient } from "./providers";
 import type { StepResult } from "./providers/types";
 import { StreamPublisher } from "./publisher";
-import { describeToolCall, executeTool, TOOL_SPECS, type ToolContext } from "./tools";
+import { reviewReply } from "./review";
+import { describeToolCall, executeTool, toolsFor, type ToolBilling, type ToolContext } from "./tools";
 
 const REPLY_MAX_OUTPUT_TOKENS = 12_000;
-const MAX_MODEL_CALLS = 6;
+const REVIEW_MAX_OUTPUT_TOKENS = 6_000;
 const WEB_SEARCHES_PER_CALL = 3;
 /** Stays well inside the route's 300s maxDuration, leaving time to save. */
 const RUN_DEADLINE_MS = 240_000;
+/** A double-check only starts with at least this much of the deadline left. */
+const REVIEW_TIME_MS = 45_000;
 const CANCEL_POLL_MS = 1_200;
 const MAX_REPLY_CHARS = 16_000;
+const MAX_EVIDENCE_CHARS = 3_000;
 
 export interface ReplyRunInput {
   runId: string;
@@ -39,6 +43,21 @@ export interface ReplyRunInput {
   agent: AgentRow;
   /** Chosen by the router for this reply. */
   model: AiModel;
+}
+
+/** Working in code takes more rounds of reading than a quick answer does. */
+export function modelCallBudget(tools: readonly string[]) {
+  if (tools.includes("github")) return 16;
+  if (tools.includes("tasks") || tools.includes("web")) return 8;
+  return 6;
+}
+
+/** The agent's creativity setting moves its specialty's usual temperature. */
+export function temperatureFor(agent: Pick<AgentRow, "specialty" | "creativity">) {
+  const base = SPECIALTY_PROFILES[toSpecialty(agent.specialty)].temperature;
+  if (agent.creativity === "precise") return Math.min(base, 0.15);
+  if (agent.creativity === "creative") return Math.min(1, Math.max(base + 0.3, 0.85));
+  return base;
 }
 
 const joinText = (before: string, next: string) => (before && next ? `${before}\n\n${next}` : before || next);
@@ -62,10 +81,11 @@ async function settle(admin: AdminClient, runId: string, credits: number, usage:
 
 /**
  * Runs one agent reply end to end: context → model calls with tools → live
- * stream → credits held and settled per call from the asker's wallet → final
- * message saved. When the AI account can't use the routed model, another
- * available model answers instead, as long as nothing has reached the chat.
- * Always finishes the run, whatever happens, so no reply is left spinning.
+ * stream → credits held and settled per call from the asker's wallet → an
+ * optional double-check → final message saved. When the AI account can't use
+ * the routed model, another available model answers instead, as long as
+ * nothing has reached the chat. Always finishes the run, whatever happens, so
+ * no reply is left spinning.
  */
 export async function runAgentReply(input: ReplyRunInput): Promise<void> {
   const log = logger.child({ module: "agent-run", runId: input.runId, agentId: input.agent.id, model: input.model.id });
@@ -116,13 +136,13 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
         });
     }, CANCEL_POLL_MS);
 
-    const context = await buildReplyContext(admin, input);
+    const github = input.agent.tools.includes("github") ? await loadGithubAccess(admin, input.workspaceId) : null;
+    const context = await buildReplyContext(admin, { ...input, githubConnected: github !== null });
     addStep({ kind: "read", label: `Read ${pluralize(context.messageCount, "message")}` });
     if (context.relatedCount > 0) {
       addStep({ kind: "tool", label: `Found ${pluralize(context.relatedCount, "related message")} in other chats` });
     }
 
-    const tools = (input.agent.tools as AgentToolId[]).flatMap((id) => (id === "web" ? [] : [TOOL_SPECS[id]]));
     const wantsWeb = input.agent.tools.includes("web");
     let webSearch = wantsWeb && model.webSearch !== null;
     const openSession = () =>
@@ -130,10 +150,10 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
         model,
         system: context.system,
         userMessage: context.userMessage,
-        tools,
+        tools: toolsFor(input.agent.tools, { nativeWebSearch: webSearch, github }),
         webSearch,
         maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
-        temperature: SPECIALTY_PROFILES[specialty].temperature,
+        temperature: temperatureFor(input.agent),
       });
     let session = openSession();
 
@@ -143,18 +163,33 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
         ? fallbackModel(model, specialty, configuredModels().filter((item) => !isModelRefused(item.id)), tried)
         : null;
 
+    // Paid tool work, like a web search, is held and settled on the same run as the model calls.
+    const billing: ToolBilling = {
+      hold: async (credits) => (await reserve(admin, input.runId, credits, credits)) > 0,
+      settle: (credits) => settle(admin, input.runId, credits, null, 0),
+    };
+
     const toolContext: ToolContext = {
       admin,
       directory: context.directory,
       workspaceId: input.workspaceId,
       conversationId: input.conversationId,
       userId: input.userId,
+      agentId: input.agent.id,
+      agentName: input.agent.name,
       oldestLoadedAt: context.oldestLoadedAt,
+      github,
+      billing,
+      signal: controller.signal,
     };
 
+    /** What the tools returned, for the double-check to hold the reply against. */
+    const evidence: string[] = [];
+    const maxCalls = modelCallBudget(input.agent.tools);
     let promptTokens = estimateTokens(context.system + context.userMessage);
+    let finishedCleanly = false;
 
-    for (let call = 0; call < MAX_MODEL_CALLS; call += 1) {
+    for (let call = 0; call < maxCalls; call += 1) {
       const held = await reserve(
         admin,
         input.runId,
@@ -228,8 +263,11 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
           }),
         );
         session.addToolResults(outputs);
+        for (const output of outputs) {
+          if (!output.isError) evidence.push(`${output.name}:\n${output.output.slice(0, MAX_EVIDENCE_CHARS)}`);
+        }
         promptTokens += outputs.reduce((sum, output) => sum + estimateTokens(output.output), 0);
-        if (call === MAX_MODEL_CALLS - 1) {
+        if (call === maxCalls - 1) {
           text = joinText(text, "_I ran out of steps before finishing. Ask me to keep going._");
         }
         continue;
@@ -237,10 +275,59 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
       if (result.outcome === "continue") continue;
       if (result.outcome === "refused" && !text.trim()) text = "I can't help with that one.";
       if (result.outcome === "max_tokens") text = joinText(text, "_I hit my length limit. Ask me to continue._");
+      finishedCleanly = result.outcome === "done";
       break;
     }
 
-    if (!text.trim()) text = "I don't have anything to add here.";
+    const doubleCheck = async (draft: string) => {
+      addStep({ kind: "note", label: "Double-checking the answer" });
+      const inputTokens = estimateTokens(context.userMessage + evidence.join("\n") + draft) + 1500;
+      const held = await reserve(
+        admin,
+        input.runId,
+        estimateReservation(model, { inputTokens, maxOutputTokens: REVIEW_MAX_OUTPUT_TOKENS }),
+        estimateReservation(model, { inputTokens, maxOutputTokens: 512 }),
+      );
+      if (held === 0) return draft;
+
+      let review: Awaited<ReturnType<typeof reviewReply>> | null = null;
+      try {
+        review = await reviewReply({
+          model,
+          rules: input.agent.rules ?? "",
+          request: context.userMessage,
+          evidence,
+          draft,
+          signal: controller.signal,
+          maxOutputTokens: REVIEW_MAX_OUTPUT_TOKENS,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
+        log.warn("double-check failed; keeping the draft", { detail: describeFailure(error) });
+      } finally {
+        await settle(admin, input.runId, review ? creditsForUsage(review.model, review.usage) : 0, review?.usage ?? null, 0).catch(
+          (error: unknown) => log.error("could not settle the double-check", { error }),
+        );
+      }
+
+      if (review?.verdict === "revise" && review.reply.trim().length >= Math.min(40, draft.length / 2)) {
+        const corrected = review.reply.trim();
+        publisher.setText(corrected);
+        addStep({
+          kind: "note",
+          label: review.issues.length > 0 ? `Double-checked: fixed ${pluralize(review.issues.length, "issue")}` : "Double-checked and tightened",
+        });
+        return corrected;
+      }
+      if (review) addStep({ kind: "note", label: "Double-checked" });
+      return draft;
+    };
+
+    if (!text.trim()) {
+      text = "I don't have anything to add here.";
+    } else if (input.agent.double_check && finishedCleanly && Date.now() - startedAt < RUN_DEADLINE_MS - REVIEW_TIME_MS) {
+      text = await doubleCheck(text);
+    }
   } catch (error) {
     const reason: unknown = controller.signal.aborted ? controller.signal.reason : null;
     if (reason instanceof RunCancelledError) {

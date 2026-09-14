@@ -63,13 +63,23 @@ export interface Participant {
   lastReadAt: string;
 }
 
-export type SystemEvent = "group_created" | "members_added" | "member_left" | "renamed" | "agent_added" | "agent_removed";
+export type SystemEvent =
+  | "group_created"
+  | "members_added"
+  | "member_left"
+  | "renamed"
+  | "agent_added"
+  | "agent_removed"
+  | "task_created"
+  | "task_completed";
 
 export interface SystemMeta {
   event?: SystemEvent;
   name?: string | null;
   user_ids?: string[];
   agent_id?: string;
+  task_id?: string;
+  number?: number;
 }
 
 export interface MessagePreview {
@@ -168,7 +178,7 @@ export interface PendingInvitation {
 
 // AI agents ───────────────────────────────────────────────────────────────────
 
-export const AGENT_TOOL_IDS = ["history", "search", "directory", "web"] as const;
+export const AGENT_TOOL_IDS = ["history", "search", "directory", "web", "tasks", "github"] as const;
 export type AgentToolId = (typeof AGENT_TOOL_IDS)[number];
 
 export const AGENT_GLYPHS = ["orbit", "prism", "wave", "spark", "grid", "bloom"] as const;
@@ -187,6 +197,16 @@ export type ModelMode = (typeof MODEL_MODES)[number];
 
 export type AgentVisibility = "workspace" | "private";
 
+/** How far an agent strays from the most likely wording: exact for facts and code, freer for ideas. */
+export const CREATIVITY_LEVELS = ["precise", "balanced", "creative"] as const;
+export type Creativity = (typeof CREATIVITY_LEVELS)[number];
+
+/** A worked example of a message and the reply the team wants for it. */
+export interface AgentExample {
+  prompt: string;
+  reply: string;
+}
+
 export interface Agent {
   id: string;
   workspaceId: string;
@@ -197,6 +217,12 @@ export interface Agent {
   instructions: string;
   /** Reference facts from the team that the agent treats as reliable. */
   knowledge: string;
+  /** Always/never rules that override its general method. */
+  rules: string;
+  examples: AgentExample[];
+  creativity: Creativity;
+  /** Reviews each draft against the evidence before it's final. */
+  doubleCheck: boolean;
   specialty: Specialty;
   responseStyle: ResponseStyle;
   modelMode: ModelMode;
@@ -255,6 +281,69 @@ export interface CreditAccount {
   reserved: number;
   lifetimeGranted: number;
   lifetimeUsed: number;
+}
+
+// Tasks ───────────────────────────────────────────────────────────────────────
+
+export const TASK_STATUSES = ["todo", "in_progress", "blocked", "done", "cancelled"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const TASK_PRIORITIES = ["none", "low", "medium", "high", "urgent"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+export interface Task {
+  id: string;
+  workspaceId: string;
+  /** Counts up per workspace: T-1, T-2… */
+  number: number;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  /** A person or an agent does the task, never both. */
+  assigneeId: string | null;
+  agentId: string | null;
+  /** A calendar date, YYYY-MM-DD. */
+  dueOn: string | null;
+  /** The chat it came from, and the message it was made from. */
+  conversationId: string | null;
+  messageId: string | null;
+  createdBy: string | null;
+  /** Set when an agent created it for the person who asked. */
+  createdByAgent: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+/** A task being written before it exists: what the dialog opens with. */
+export interface TaskDraft {
+  title?: string;
+  description?: string;
+  priority?: TaskPriority;
+  assigneeId?: string | null;
+  agentId?: string | null;
+  dueOn?: string | null;
+  conversationId?: string | null;
+  messageId?: string | null;
+}
+
+// Connected apps ──────────────────────────────────────────────────────────────
+
+export type IntegrationProvider = "github";
+
+export interface Integration {
+  id: string;
+  workspaceId: string;
+  provider: IntegrationProvider;
+  /** The GitHub account or organization the app is installed on. */
+  accountLogin: string;
+  accountType: string;
+  /** "owner/name" agents use when nobody names a repository. */
+  defaultRepo: string | null;
+  connectedBy: string | null;
+  createdAt: string;
 }
 
 export interface UsageBucket {
