@@ -252,7 +252,7 @@ describe("Claude on Amazon Bedrock", () => {
     const provider = await load();
 
     await expect(provider.generateObject({ ...structuredRequest, model: findModel("claude-haiku-4-5")! })).rejects.toMatchObject({
-      kind: "bad_request",
+      kind: "unavailable",
       message: "AI isn’t available right now. Try again soon.",
       detail: expect.stringMatching(
         /^Tried Claude Haiku 4\.5, Claude Opus 5, Claude Sonnet 5\. 403 anthropic\.claude-sonnet-5 is not available for this account/,

@@ -368,8 +368,8 @@ export type Database = {
           finished_at: string | null;
         };
         Insert: never;
-        /** Server only (service role): the provider's reason for a failed run. */
-        Update: { error?: string | null };
+        /** Server only (service role): the provider's reason for a failed run, or the model that stood in. */
+        Update: { error?: string | null; model?: string };
         Relationships: [];
       };
       ai_wallets: {

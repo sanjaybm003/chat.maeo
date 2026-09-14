@@ -110,6 +110,19 @@ export function modelForTier(tier: ModelTier, specialty: Specialty, available: r
   return nearestModel(tier, available, specialty, false);
 }
 
+/**
+ * The stand-in when the account can't use a model: another model of the same
+ * tier if there is one, otherwise the nearest tier, never one already tried.
+ */
+export function fallbackModel(current: AiModel, specialty: Specialty, available: readonly AiModel[], tried: ReadonlySet<string>) {
+  return nearestModel(
+    current.tier,
+    available.filter((model) => !tried.has(model.id)),
+    specialty,
+    false,
+  );
+}
+
 const TIER_REASON: Record<ModelTier, string> = {
   fast: "a quick request",
   balanced: "an everyday request",

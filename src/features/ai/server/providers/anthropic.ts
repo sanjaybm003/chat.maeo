@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 
 import { bedrockModelId, type BedrockEndpoint, type ClaudeHost } from "../../claude-hosts";
 import type { AiModel } from "../../models";
+import { markModelRefused, MODEL_PROBLEM } from "../availability";
 import { aiEnv, configuredModels } from "../env";
 import {
   ProviderError,
@@ -102,8 +103,6 @@ function detailOf(error: unknown) {
   return (error instanceof Error ? error.message : String(error)).trim().slice(0, 400);
 }
 
-const MODEL_PROBLEM = /\bmodels?\b|identifier|inference profile|throughput|not (?:currently )?(?:available|supported|enabled)|access to/i;
-
 /** Bedrock turns away a model the account can't use with a 404, or a 400/403 that names the model. */
 function isModelRefused(error: unknown) {
   if (error instanceof Anthropic.NotFoundError) return true;
@@ -146,7 +145,7 @@ function translateError(error: unknown, active: ClaudeBackend, context?: string)
   if (isModelRefused(error)) {
     log.error(`${describe(active)} refused every Claude model it was offered`, { hint: bedrockHint(), context, error });
     // Every available model was already tried, so there's no other model to suggest.
-    fail("bad_request", UNAVAILABLE, error, context);
+    fail("unavailable", UNAVAILABLE, error, context);
   }
   if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
     log.error(`${describe(active)} refused the credentials`, {
@@ -220,6 +219,8 @@ async function withBackend<T>(
           log.warn(`${describe(active)} refused ${current.label}; using another Claude model for now`, { detail: detailOf(error) });
         }
         refusedModels.set(refusedKey(active, current), Date.now() + REFUSED_MODEL_TTL_MS);
+        // Routing for later replies steers around it too.
+        markModelRefused(current.id);
         const next = alternativesTo(current).find((item) => !tried.has(`${active.endpoint}:${item.id}`) && !isRefused(active, item));
         if (next) {
           current = next;

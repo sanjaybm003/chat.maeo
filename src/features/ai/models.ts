@@ -9,7 +9,8 @@
  * credits never under-charge.
  */
 
-export type AiProvider = "anthropic" | "google" | "openai" | "deepseek";
+/** bedrock: open models served by Amazon Bedrock itself, sold by AWS rather than through AWS Marketplace. */
+export type AiProvider = "anthropic" | "google" | "openai" | "deepseek" | "bedrock";
 export type ModelTier = "fast" | "balanced" | "deep";
 
 export interface AiModel {
@@ -21,6 +22,8 @@ export interface AiModel {
   inputPrice: number;
   outputPrice: number;
   contextWindow: number;
+  /** The longest answer the model can write, when it's below what a reply may ask for. */
+  maxOutputTokens?: number;
   /** Newer reasoning models reject sampling parameters outright. */
   supportsTemperature: boolean;
   /** Provider-hosted web search, when the model has it. */
@@ -33,6 +36,7 @@ export const PROVIDERS: Record<AiProvider, { label: string; envKey: string }> = 
   openai: { label: "OpenAI", envKey: "OPENAI_API_KEY" },
   google: { label: "Google", envKey: "GEMINI_API_KEY" },
   deepseek: { label: "DeepSeek", envKey: "DEEPSEEK_API_KEY" },
+  bedrock: { label: "Amazon Bedrock", envKey: "BEDROCK_API_KEY" },
 };
 
 export const TIER_LABELS: Record<ModelTier, string> = {
@@ -177,6 +181,73 @@ export const AI_MODELS: readonly AiModel[] = [
     supportsTemperature: true,
     webSearch: null,
   },
+  // Open models on Amazon Bedrock, at Bedrock's us-east-1 on-demand prices. Ids are
+  // the bedrock-mantle endpoint's; they run with the same Bedrock API key as Claude.
+  {
+    id: "deepseek.v3.2",
+    provider: "bedrock",
+    label: "DeepSeek V3.2",
+    tier: "deep",
+    summary: "Careful reasoning for analysis and hard questions.",
+    inputPrice: 0.62,
+    outputPrice: 1.85,
+    contextWindow: 164_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "qwen.qwen3-235b-a22b-2507",
+    provider: "bedrock",
+    label: "Qwen3 235B",
+    tier: "balanced",
+    summary: "Follows detailed instructions well in long conversations.",
+    inputPrice: 0.53,
+    outputPrice: 2.66,
+    contextWindow: 256_000,
+    maxOutputTokens: 8_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "mistral.mistral-large-3-675b-instruct",
+    provider: "bedrock",
+    label: "Mistral Large 3",
+    tier: "balanced",
+    summary: "Clear writing and summaries across long threads.",
+    inputPrice: 0.5,
+    outputPrice: 1.5,
+    contextWindow: 256_000,
+    maxOutputTokens: 32_000,
+    supportsTemperature: true,
+    webSearch: null,
+  },
+  {
+    id: "openai.gpt-oss-120b",
+    provider: "bedrock",
+    label: "gpt-oss 120B",
+    tier: "fast",
+    summary: "OpenAI’s open model: quick, low-cost everyday answers.",
+    inputPrice: 0.15,
+    outputPrice: 0.6,
+    contextWindow: 128_000,
+    maxOutputTokens: 16_000,
+    supportsTemperature: false,
+    webSearch: null,
+  },
+  {
+    id: "openai.gpt-oss-20b",
+    provider: "bedrock",
+    label: "gpt-oss 20B",
+    tier: "fast",
+    summary: "The lightest option for short, simple replies.",
+    inputPrice: 0.07,
+    outputPrice: 0.2,
+    contextWindow: 128_000,
+    maxOutputTokens: 16_000,
+    supportsTemperature: false,
+    webSearch: null,
+  },
 ];
 
 const BY_ID = new Map(AI_MODELS.map((model) => [model.id, model]));
@@ -192,14 +263,19 @@ export const ARCHITECT_MODEL_PREFERENCE = [
   "gemini-3.8-flash",
   "gpt-5.6-terra",
   "deepseek-v4-pro",
+  "qwen.qwen3-235b-a22b-2507",
+  "deepseek.v3.2",
+  "mistral.mistral-large-3-675b-instruct",
 ] as const;
 
+/** Every available model in drafting preference order: the preferred ones, then the rest as listed. */
+export function architectCandidates(available: readonly AiModel[]): AiModel[] {
+  const preferred = ARCHITECT_MODEL_PREFERENCE.flatMap((id) => available.filter((item) => item.id === id));
+  return [...preferred, ...available.filter((item) => !preferred.includes(item))];
+}
+
 export function pickArchitectModel(available: readonly AiModel[]): AiModel | null {
-  for (const id of ARCHITECT_MODEL_PREFERENCE) {
-    const model = available.find((item) => item.id === id);
-    if (model) return model;
-  }
-  return available[0] ?? null;
+  return architectCandidates(available)[0] ?? null;
 }
 
 /** The catalog's order is the preference order: first available model in a tier wins. */

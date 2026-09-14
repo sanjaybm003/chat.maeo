@@ -9,11 +9,13 @@ import type { AgentRunStep } from "@/types/domain";
 import type { AgentToolId } from "../agent-spec";
 import { creditsForUsage, estimateReservation, estimateTokens, type TokenUsage } from "../credits";
 import type { AiModel } from "../models";
+import { fallbackModel } from "../router";
 import { SPECIALTY_PROFILES, toSpecialty } from "../specialties";
+import { isModelRefused, MAX_MODEL_ATTEMPTS, worthAnotherModel } from "./availability";
 import { buildReplyContext, type AgentRow } from "./context";
 import type { AdminClient } from "./directory";
 import { AgentRunError, describeFailure, friendlyRunError, RunCancelledError, RunDeadlineError } from "./errors";
-import { isProviderConfigured } from "./env";
+import { configuredModels, isProviderConfigured } from "./env";
 import { providerClient } from "./providers";
 import type { StepResult } from "./providers/types";
 import { StreamPublisher } from "./publisher";
@@ -61,8 +63,9 @@ async function settle(admin: AdminClient, runId: string, credits: number, usage:
 /**
  * Runs one agent reply end to end: context → model calls with tools → live
  * stream → credits held and settled per call from the asker's wallet → final
- * message saved. Always finishes the run, whatever happens, so no reply is
- * left spinning.
+ * message saved. When the AI account can't use the routed model, another
+ * available model answers instead, as long as nothing has reached the chat.
+ * Always finishes the run, whatever happens, so no reply is left spinning.
  */
 export async function runAgentReply(input: ReplyRunInput): Promise<void> {
   const log = logger.child({ module: "agent-run", runId: input.runId, agentId: input.agent.id, model: input.model.id });
@@ -75,7 +78,10 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
   const controller = new AbortController();
   const steps: AgentRunStep[] = [];
   const startedAt = Date.now();
-  const model = input.model;
+  const specialty = toSpecialty(input.agent.specialty);
+  /** The routed model, until the account turns it away and another stands in. */
+  let model = input.model;
+  const tried = new Set([model.id]);
 
   let text = "";
   let status: "succeeded" | "failed" | "cancelled" = "succeeded";
@@ -117,16 +123,25 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
     }
 
     const tools = (input.agent.tools as AgentToolId[]).flatMap((id) => (id === "web" ? [] : [TOOL_SPECS[id]]));
-    const webSearch = input.agent.tools.includes("web") && model.webSearch !== null;
-    const session = providerClient(model.provider).createSession({
-      model,
-      system: context.system,
-      userMessage: context.userMessage,
-      tools,
-      webSearch,
-      maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
-      temperature: SPECIALTY_PROFILES[toSpecialty(input.agent.specialty)].temperature,
-    });
+    const wantsWeb = input.agent.tools.includes("web");
+    let webSearch = wantsWeb && model.webSearch !== null;
+    const openSession = () =>
+      providerClient(model.provider).createSession({
+        model,
+        system: context.system,
+        userMessage: context.userMessage,
+        tools,
+        webSearch,
+        maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
+        temperature: SPECIALTY_PROFILES[specialty].temperature,
+      });
+    let session = openSession();
+
+    /** Another model to answer with, when the failure is this model's account trouble rather than the request. */
+    const standInFor = (error: unknown) =>
+      !controller.signal.aborted && worthAnotherModel(error) && tried.size < MAX_MODEL_ATTEMPTS
+        ? fallbackModel(model, specialty, configuredModels().filter((item) => !isModelRefused(item.id)), tried)
+        : null;
 
     const toolContext: ToolContext = {
       admin,
@@ -154,6 +169,7 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
 
       let streamed = "";
       let result: StepResult | null = null;
+      let standIn: AiModel | null = null;
       try {
         result = await session.step({
           signal: controller.signal,
@@ -162,6 +178,14 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
             publisher.setText(joinText(text, streamed));
           },
           onActivity: addStep,
+        });
+      } catch (error) {
+        standIn = call === 0 && !streamed ? standInFor(error) : null;
+        if (!standIn) throw error;
+        log.warn("the account can't use this model; another model is answering", {
+          from: model.id,
+          to: standIn.id,
+          detail: describeFailure(error),
         });
       } finally {
         // A call that failed mid-answer was still billed by the provider for what it streamed.
@@ -176,6 +200,20 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
           if (result) throw settleError;
           log.error("could not settle credits for a failed call", { error: settleError });
         }
+      }
+
+      if (!result) {
+        // Only a failure another model can get past reaches here; every other one was rethrown.
+        if (!standIn) break;
+        tried.add(standIn.id);
+        model = standIn;
+        webSearch = wantsWeb && model.webSearch !== null;
+        session = openSession();
+        const { error: modelError } = await admin.from("ai_runs").update({ model: model.id }).eq("id", input.runId);
+        if (modelError) log.warn("could not record the stand-in model", { error: modelError });
+        // The stand-in starts fresh, with every call still ahead of it.
+        call -= 1;
+        continue;
       }
 
       text = joinText(text, result.text || streamed);

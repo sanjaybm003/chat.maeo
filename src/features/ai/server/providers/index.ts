@@ -3,7 +3,7 @@ import "server-only";
 import type { AiProvider } from "../../models";
 import { anthropicProvider } from "./anthropic";
 import { googleProvider } from "./google";
-import { deepseekProvider, openaiProvider } from "./openai-compatible";
+import { bedrockProvider, deepseekProvider, openaiProvider } from "./openai-compatible";
 import type { AiProviderClient } from "./types";
 
 const REGISTRY: Record<AiProvider, AiProviderClient> = {
@@ -11,6 +11,7 @@ const REGISTRY: Record<AiProvider, AiProviderClient> = {
   google: googleProvider,
   openai: openaiProvider,
   deepseek: deepseekProvider,
+  bedrock: bedrockProvider,
 };
 
 export function providerClient(provider: AiProvider): AiProviderClient {

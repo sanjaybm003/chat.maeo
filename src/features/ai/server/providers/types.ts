@@ -91,7 +91,16 @@ export interface AiProviderClient {
   generateObject<T>(request: StructuredRequest<T>): Promise<{ value: T; usage: StepUsage; model?: AiModel }>;
 }
 
-export type ProviderErrorKind = "not_configured" | "auth" | "rate_limited" | "overloaded" | "bad_request" | "refused" | "network";
+/** unavailable: the AI account can't use this model right now; another model may still work. */
+export type ProviderErrorKind =
+  | "not_configured"
+  | "auth"
+  | "unavailable"
+  | "rate_limited"
+  | "overloaded"
+  | "bad_request"
+  | "refused"
+  | "network";
 
 export class ProviderError extends Error {
   constructor(

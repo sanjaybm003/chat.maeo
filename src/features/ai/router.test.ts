@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AI_MODELS, findModel } from "./models";
-import { routeModel, scoreComplexity, tierForComplexity } from "./router";
+import { fallbackModel, routeModel, scoreComplexity, tierForComplexity } from "./router";
 
 const base = { style: "balanced", mode: "auto", agentModel: "claude-sonnet-5", available: AI_MODELS } as const;
 const pick = (...ids: string[]) => ids.map((id) => findModel(id)!);
@@ -22,6 +22,18 @@ describe("scoreComplexity", () => {
     expect(scoreComplexity("why is this failing\n```ts\nthrow new Error()\n```", "engineering", "balanced")).toBeGreaterThan(plain);
     expect(scoreComplexity("why is this failing", "engineering", "concise")).toBeLessThan(plain);
     expect(scoreComplexity("analyze compare evaluate ".repeat(80), "analysis", "detailed")).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("fallbackModel", () => {
+  it("stands in with the same tier first, then the nearest, never repeating a model", () => {
+    const haiku = findModel("claude-haiku-4-5")!;
+    const available = pick("claude-haiku-4-5", "claude-sonnet-5", "openai.gpt-oss-20b", "deepseek.v3.2");
+    expect(fallbackModel(haiku, "assistant", available, new Set(["claude-haiku-4-5"]))?.id).toBe("openai.gpt-oss-20b");
+    expect(fallbackModel(haiku, "assistant", available, new Set(["claude-haiku-4-5", "openai.gpt-oss-20b", "claude-sonnet-5"]))?.id).toBe(
+      "deepseek.v3.2",
+    );
+    expect(fallbackModel(haiku, "assistant", pick("claude-haiku-4-5"), new Set(["claude-haiku-4-5"]))).toBeNull();
   });
 });
 

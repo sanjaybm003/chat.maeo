@@ -2,6 +2,7 @@ import "server-only";
 
 import { describeBedrockKey, onBedrock, readClaudeSettings, type BedrockEndpoint, type ClaudeHost } from "../claude-hosts";
 import { AI_MODELS, type AiModel, type AiProvider } from "../models";
+import { isModelRefused } from "./availability";
 
 const read = (name: string) => process.env[name]?.trim() || null;
 const claude = () => readClaudeSettings(process.env);
@@ -47,6 +48,8 @@ export function isProviderConfigured(provider: AiProvider): boolean {
   switch (provider) {
     case "anthropic":
       return aiEnv.claudeHost !== null;
+    case "bedrock":
+      return Boolean(aiEnv.bedrockKey);
     case "google":
       return Boolean(aiEnv.geminiKey);
     case "openai":
@@ -57,12 +60,16 @@ export function isProviderConfigured(provider: AiProvider): boolean {
 }
 
 /**
- * Models this server can actually run, in preference order, as they are
- * served here: Claude on Bedrock comes without web search and at Bedrock's price.
+ * Models this server can run right now, in preference order, as they are
+ * served here: Claude on Bedrock comes without web search and at Bedrock's
+ * price, and models the account was recently refused are left out while any
+ * others remain.
  */
 export function configuredModels(): AiModel[] {
   const claudeOnBedrock = aiEnv.claudeHost === "bedrock";
-  return AI_MODELS.filter((model) => isProviderConfigured(model.provider)).map((model) =>
+  const served = AI_MODELS.filter((model) => isProviderConfigured(model.provider)).map((model) =>
     claudeOnBedrock && model.provider === "anthropic" ? onBedrock(model) : model,
   );
+  const usable = served.filter((model) => !isModelRefused(model.id));
+  return usable.length > 0 ? usable : served;
 }

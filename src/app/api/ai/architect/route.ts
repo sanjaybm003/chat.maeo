@@ -62,6 +62,9 @@ export async function POST(request: Request) {
     }
     if (error instanceof ProviderError) {
       logger.warn("architect provider error", { kind: error.kind, provider: error.provider });
+      if (error.kind === "unavailable" || error.kind === "auth" || error.kind === "not_configured") {
+        return reply(503, { error: "AI isn’t available right now. Try again soon.", code: "unavailable" });
+      }
       const status = error.kind === "rate_limited" ? 429 : error.kind === "refused" ? 422 : 502;
       const message =
         error.kind === "refused" ? "That description couldn’t be turned into an agent." : "AI is busy right now. Try again in a moment.";

@@ -41,7 +41,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     style: "balanced",
     baseline: 0.3,
     temperature: 0.6,
-    providers: ["anthropic", "google", "openai", "deepseek"],
+    providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
   },
   research: {
     id: "research",
@@ -53,7 +53,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     style: "balanced",
     baseline: 0.55,
     temperature: 0.3,
-    providers: ["anthropic", "google", "openai", "deepseek"],
+    providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
   },
   writing: {
     id: "writing",
@@ -65,7 +65,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     style: "balanced",
     baseline: 0.45,
     temperature: 0.8,
-    providers: ["openai", "anthropic", "google", "deepseek"],
+    providers: ["openai", "anthropic", "google", "deepseek", "bedrock"],
   },
   analysis: {
     id: "analysis",
@@ -77,7 +77,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     style: "detailed",
     baseline: 0.62,
     temperature: 0.2,
-    providers: ["anthropic", "google", "openai", "deepseek"],
+    providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
   },
   planning: {
     id: "planning",
@@ -89,7 +89,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     style: "balanced",
     baseline: 0.5,
     temperature: 0.4,
-    providers: ["anthropic", "openai", "google", "deepseek"],
+    providers: ["anthropic", "openai", "google", "deepseek", "bedrock"],
   },
   support: {
     id: "support",
@@ -101,7 +101,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     style: "concise",
     baseline: 0.3,
     temperature: 0.4,
-    providers: ["anthropic", "google", "openai", "deepseek"],
+    providers: ["anthropic", "google", "openai", "deepseek", "bedrock"],
   },
   engineering: {
     id: "engineering",
@@ -113,7 +113,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     style: "balanced",
     baseline: 0.62,
     temperature: 0.2,
-    providers: ["anthropic", "openai", "google", "deepseek"],
+    providers: ["anthropic", "openai", "google", "deepseek", "bedrock"],
   },
 };
 

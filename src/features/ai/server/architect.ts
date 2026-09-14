@@ -12,8 +12,9 @@ import {
   type AgentDraft,
 } from "../agent-spec";
 import { creditsForUsage, estimateReservation, estimateTokens } from "../credits";
-import { pickArchitectModel, type AiModel } from "../models";
+import { architectCandidates, pickArchitectModel, type AiModel } from "../models";
 import { SPECIALTY_PROFILES } from "../specialties";
+import { isModelRefused, MAX_MODEL_ATTEMPTS, worthAnotherModel } from "./availability";
 import type { AdminClient } from "./directory";
 import { configuredModels } from "./env";
 import { AgentRunError } from "./errors";
@@ -54,7 +55,7 @@ If the description is vague, make sensible choices for a small team instead of a
 function pickModel(): AiModel {
   const model = pickArchitectModel(configuredModels());
   if (!model) {
-    log.error("no AI provider keys configured: set ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY or DEEPSEEK_API_KEY");
+    log.error("no AI provider keys configured: set BEDROCK_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY or DEEPSEEK_API_KEY");
     throw new AgentRunError("AI isn’t available right now. Try again soon.", "unavailable");
   }
   return model;
@@ -127,7 +128,7 @@ export async function draftAgentBlueprint(input: {
   current: AgentDraft | null;
   specialty: Specialty | null;
 }): Promise<BlueprintResult> {
-  const model = pickModel();
+  let model = pickModel();
   const admin = createSupabaseAdminClient();
 
   const { data: runId, error: startError } = await admin.rpc("ai_start_architect_run", {
@@ -150,15 +151,34 @@ export async function draftAgentBlueprint(input: {
     if (holdError) throw holdError;
     if (!held) throw new AgentRunError("You’re out of AI credits.", "out_of_credits");
 
-    const result = await providerClient(model.provider).generateObject({
-      model,
-      system: ARCHITECT_SYSTEM,
-      prompt,
-      jsonSchema: ARCHITECT_JSON_SCHEMA,
-      parse: (value) => normalizeDraft(architectOutputSchema.parse(value)),
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-      signal: AbortSignal.timeout(55_000),
-    });
+    const signal = AbortSignal.timeout(55_000);
+    const tried = new Set<string>();
+    let result: { value: AgentDraft; usage: StepUsage; model?: AiModel } | null = null;
+    while (!result) {
+      tried.add(model.id);
+      try {
+        result = await providerClient(model.provider).generateObject({
+          model,
+          system: ARCHITECT_SYSTEM,
+          prompt,
+          jsonSchema: ARCHITECT_JSON_SCHEMA,
+          parse: (value) => normalizeDraft(architectOutputSchema.parse(value)),
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          signal,
+        });
+      } catch (error) {
+        // If the account can't use this model, the next one in line drafts instead.
+        const next =
+          worthAnotherModel(error) && tried.size < MAX_MODEL_ATTEMPTS
+            ? architectCandidates(configuredModels()).find((item) => !tried.has(item.id) && !isModelRefused(item.id))
+            : undefined;
+        if (!next) throw error;
+        log.warn("the account can't use this model; another model is drafting", { runId, from: model.id, to: next.id });
+        model = next;
+        const { error: modelError } = await admin.from("ai_runs").update({ model: model.id }).eq("id", runId);
+        if (modelError) log.warn("could not record the stand-in model", { runId, error: modelError });
+      }
+    }
     usage = result.usage;
 
     const draft = {
