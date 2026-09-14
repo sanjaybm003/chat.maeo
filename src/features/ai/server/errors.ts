@@ -32,7 +32,7 @@ export class RunDeadlineError extends Error {
 export function friendlyRunError(error: unknown): string {
   if (error instanceof AgentRunError || error instanceof ProviderError) return error.message;
   if (error && typeof error === "object" && "code" in error && error.code === "P0402") {
-    return "This workspace is out of AI credits.";
+    return "You’re out of AI credits.";
   }
   return "Something went wrong while replying. Try again.";
 }

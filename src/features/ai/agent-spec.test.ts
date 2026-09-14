@@ -19,23 +19,44 @@ describe("normalizeDraft", () => {
       handle: "@Not Valid!",
       tagline: "Finds   what you need",
       instructions: "You help the team find decisions in past conversations quickly.",
+      knowledge: "  Launch is planned for October.  ",
+      specialty: "research",
+      responseStyle: "chatty",
       tools: ["search", "search", "teleport", "history"],
       starters: ["  What did we decide?  ", "", "a", "b", "c"],
       color: "neon",
       glyph: "spark",
-      tier: "galaxy-brain",
     });
 
     expect(draft).toMatchObject({
       name: "Scout",
       handle: "scout",
       tagline: "Finds what you need",
+      knowledge: "Launch is planned for October.",
+      specialty: "research",
+      responseStyle: "balanced",
       tools: ["search", "history"],
       starters: ["What did we decide?", "a", "b"],
       color: "iris",
       glyph: "spark",
-      tier: "balanced",
     });
+  });
+
+  it("falls back to an assistant when the specialty is unknown", () => {
+    const draft = normalizeDraft({
+      name: "Helper",
+      handle: "helper",
+      tagline: "",
+      instructions: "You answer everyday questions for the whole team.",
+      knowledge: "",
+      specialty: "wizardry",
+      responseStyle: "detailed",
+      tools: [],
+      starters: [],
+      color: "grass",
+      glyph: "bloom",
+    });
+    expect(draft).toMatchObject({ specialty: "assistant", responseStyle: "detailed" });
   });
 });
 
@@ -45,7 +66,10 @@ describe("agentInputSchema", () => {
     name: "Scout",
     handle: "Scout",
     instructions: "You help the team find decisions in past conversations quickly.",
-    model: "claude-opus-5",
+    specialty: "research",
+    responseStyle: "concise",
+    modelMode: "auto",
+    model: "claude-sonnet-5",
     tools: ["search", "search"],
     starters: [],
     color: "cobalt",
@@ -53,15 +77,18 @@ describe("agentInputSchema", () => {
     visibility: "workspace",
   };
 
-  it("normalizes handles and de-duplicates tools", () => {
+  it("normalizes handles, de-duplicates tools and defaults optional text", () => {
     const parsed = agentInputSchema.parse(valid);
     expect(parsed.handle).toBe("scout");
     expect(parsed.tools).toEqual(["search"]);
     expect(parsed.tagline).toBe("");
+    expect(parsed.knowledge).toBe("");
   });
 
-  it("rejects bad handles and thin instructions", () => {
+  it("rejects bad handles, thin instructions and unknown specialties", () => {
     expect(agentInputSchema.safeParse({ ...valid, handle: "9lives" }).success).toBe(false);
     expect(agentInputSchema.safeParse({ ...valid, instructions: "Be nice." }).success).toBe(false);
+    expect(agentInputSchema.safeParse({ ...valid, specialty: "wizardry" }).success).toBe(false);
+    expect(agentInputSchema.safeParse({ ...valid, modelMode: "random" }).success).toBe(false);
   });
 });

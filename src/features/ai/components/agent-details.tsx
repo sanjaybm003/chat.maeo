@@ -13,6 +13,7 @@ import type { Conversation } from "@/types/domain";
 
 import { AGENT_TOOLS } from "../agent-spec";
 import { findModel } from "../models";
+import { RESPONSE_STYLE_OPTIONS, SPECIALTY_PROFILES } from "../specialties";
 import { AgentAvatar, AgentGlyphMark, AgentTag } from "./agent-avatar";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -56,10 +57,12 @@ export function AgentDetails({ conversation }: { conversation: Conversation }) {
       </div>
 
       <dl className="mt-6 flex flex-col border-y border-line">
+        <Row label="Work type">{SPECIALTY_PROFILES[agent.specialty].label}</Row>
         <Row label="Model">
-          {model?.label ?? agent.model}
-          {!aiModels.includes(agent.model) ? <span className="ml-1.5 text-danger">not connected</span> : null}
+          {agent.modelMode === "auto" ? "Auto, per message" : (model?.label ?? agent.model)}
+          {agent.modelMode === "fixed" && !aiModels.includes(agent.model) ? <span className="ml-1.5 text-danger">unavailable</span> : null}
         </Row>
+        <Row label="Replies">{RESPONSE_STYLE_OPTIONS[agent.responseStyle].label}</Row>
         <Row label="Tools">{tools.length ? tools.map((tool) => tool.label).join(", ") : "None"}</Row>
         <Row label="Made by">{agent.createdBy === meId ? "You" : nameOf(agent.createdBy ? members[agent.createdBy] : null)}</Row>
         <Row label="Available to">{agent.visibility === "private" ? "Only its maker" : "Everyone here"}</Row>
@@ -69,6 +72,13 @@ export function AgentDetails({ conversation }: { conversation: Conversation }) {
         <SectionLabel>Instructions</SectionLabel>
         <p className="mt-2 line-clamp-[12] whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink-2">{agent.instructions}</p>
       </div>
+
+      {agent.knowledge.trim() ? (
+        <div className="px-5 pt-5">
+          <SectionLabel>Team knowledge</SectionLabel>
+          <p className="mt-2 line-clamp-[8] whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink-2">{agent.knowledge}</p>
+        </div>
+      ) : null}
 
       {canEdit ? (
         <div className="p-5">

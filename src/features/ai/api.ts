@@ -1,5 +1,6 @@
 import { db, unwrap } from "@/features/workspace/api/client";
 import { mapAgent, mapCreditAccount, mapUsageSummary } from "@/lib/mappers";
+import type { Specialty } from "@/types/domain";
 
 import type { AgentDraft } from "./agent-spec";
 
@@ -40,12 +41,17 @@ export interface StartedRun {
   runId: string;
   messageId: string;
   agentId: string;
+  model: string;
   created: boolean;
 }
 
-/** Wakes the agents a sent message calls on. Safe to repeat: runs are idempotent per message and agent. */
-export function requestAgentReplies(messageId: string) {
-  return postJson<{ runs: StartedRun[] }>("/api/ai/runs", { messageId });
+/**
+ * Wakes the agents a sent message calls on. `model` is a model picked for this
+ * one message, or null for each agent's own setting. Safe to repeat: runs are
+ * idempotent per message and agent.
+ */
+export function requestAgentReplies(messageId: string, model?: string | null) {
+  return postJson<{ runs: StartedRun[] }>("/api/ai/runs", { messageId, model: model ?? null });
 }
 
 export interface ArchitectResult {
@@ -54,7 +60,10 @@ export interface ArchitectResult {
   credits: number;
 }
 
-export function draftAgent(input: { workspaceId: string; prompt: string; current?: AgentDraft | null }, signal?: AbortSignal) {
+export function draftAgent(
+  input: { workspaceId: string; prompt: string; specialty?: Specialty | null; current?: AgentDraft | null },
+  signal?: AbortSignal,
+) {
   return postJson<ArchitectResult>("/api/ai/architect", input, signal);
 }
 
@@ -66,35 +75,37 @@ export async function openAgentConversation(agentId: string) {
   return unwrap(await db().rpc("create_agent_conversation", { p_agent_id: agentId }));
 }
 
+export async function addAgentToConversation(conversationId: string, agentId: string) {
+  return unwrap(await db().rpc("add_agent_to_conversation", { p_conversation_id: conversationId, p_agent_id: agentId }));
+}
+
+export async function removeAgentFromConversation(conversationId: string, agentId: string) {
+  return unwrap(await db().rpc("remove_agent_from_conversation", { p_conversation_id: conversationId, p_agent_id: agentId }));
+}
+
 export async function fetchAgent(agentId: string) {
   const row = unwrap(await db().from("ai_agents").select("*").eq("id", agentId).maybeSingle());
   return row ? mapAgent(row) : null;
 }
 
-export async function fetchCreditAccount(workspaceId: string) {
+export async function fetchCreditAccount(userId: string) {
   const row = unwrap(
-    await db()
-      .from("ai_credit_accounts")
-      .select("balance, reserved, lifetime_granted, lifetime_used")
-      .eq("workspace_id", workspaceId)
-      .maybeSingle(),
+    await db().from("ai_wallets").select("balance, reserved, lifetime_granted, lifetime_used").eq("user_id", userId).maybeSingle(),
   );
   return mapCreditAccount(row);
 }
 
-export async function fetchUsageSummary(workspaceId: string, days: number) {
+/** The signed-in person's usage across every workspace. */
+export async function fetchUsageSummary(days: number) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  return mapUsageSummary(
-    unwrap(await db().rpc("ai_usage_summary", { p_workspace_id: workspaceId, p_days: days, p_time_zone: timeZone })),
-  );
+  return mapUsageSummary(unwrap(await db().rpc("ai_my_usage", { p_days: days, p_time_zone: timeZone })));
 }
 
 export interface RecentRun {
   id: string;
   kind: "reply" | "architect";
+  workspaceId: string;
   agentId: string | null;
-  conversationId: string | null;
-  triggeredBy: string | null;
   model: string;
   status: "running" | "succeeded" | "failed" | "cancelled";
   credits: number;
@@ -105,21 +116,20 @@ export interface RecentRun {
   finishedAt: string | null;
 }
 
-export async function fetchRecentRuns(workspaceId: string, limit = 25): Promise<RecentRun[]> {
+/** Runs are private to the person who asked, so this is always "my runs". */
+export async function fetchRecentRuns(limit = 25): Promise<RecentRun[]> {
   const rows = unwrap(
     await db()
       .from("ai_runs")
-      .select("id, kind, agent_id, conversation_id, triggered_by, model, status, credits_charged, input_tokens, output_tokens, tool_calls, created_at, finished_at")
-      .eq("workspace_id", workspaceId)
+      .select("id, kind, workspace_id, agent_id, model, status, credits_charged, input_tokens, output_tokens, tool_calls, created_at, finished_at")
       .order("created_at", { ascending: false })
       .limit(limit),
   );
   return (rows ?? []).map((row) => ({
     id: row.id,
     kind: row.kind,
+    workspaceId: row.workspace_id,
     agentId: row.agent_id,
-    conversationId: row.conversation_id,
-    triggeredBy: row.triggered_by,
     model: row.model,
     status: row.status,
     credits: Number(row.credits_charged) || 0,

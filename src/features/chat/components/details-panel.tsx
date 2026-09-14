@@ -13,6 +13,7 @@ import { IconClose, IconCopy, IconUserPlus } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { AgentDetails } from "@/features/ai/components/agent-details";
+import { ChatAgents } from "@/features/ai/components/chat-agents";
 import { leaveConversation, renameConversation, setConversationMuted } from "@/features/workspace/api/conversations";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { useMessagePerson } from "@/features/workspace/hooks/use-open-conversation";
@@ -48,6 +49,7 @@ export function DetailsPanel({ conversation, onClose }: { conversation: Conversa
         ) : (
           <GroupDetails conversation={conversation} />
         )}
+        {conversation.agentId ? null : <ChatAgents conversation={conversation} />}
         <MuteRow conversation={conversation} />
       </div>
     </aside>

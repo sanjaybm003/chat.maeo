@@ -34,6 +34,7 @@ function conversation(id: string, patch: Partial<Conversation> = {}): Conversati
     ],
     lastMessage: null,
     agentId: null,
+    agentIds: [],
     ...patch,
   };
 }

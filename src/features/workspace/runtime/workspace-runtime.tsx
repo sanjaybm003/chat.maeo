@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { AiRequestError, requestAgentReplies } from "@/features/ai/api";
 import { agentsToWake } from "@/features/ai/wake";
-import { Outbox, outboxEntryToMessage } from "@/features/chat/outbox/outbox";
+import { Outbox, outboxEntryToMessage, type OutboxEntry } from "@/features/chat/outbox/outbox";
 import { createOutboxStorage } from "@/features/chat/outbox/storage";
 import { usePushSync } from "@/features/notifications/use-push-sync";
 import type { Message } from "@/types/domain";
@@ -28,10 +28,11 @@ const RuntimeContext = createContext<WorkspaceRuntime | null>(null);
  * Runs only after the send is confirmed, so an agent never answers a message
  * that didn't land; repeats are harmless because runs are idempotent.
  */
-function wakeAgents(store: WorkspaceStore, message: Message) {
+function wakeAgents(store: WorkspaceStore, message: Message, entry: OutboxEntry) {
   const { aiReady, agents, conversations } = store.getState();
-  if (!aiReady || agentsToWake(message.body, conversations[message.conversationId], agents).length === 0) return;
-  requestAgentReplies(message.id).catch((error: unknown) => {
+  const replyTo = message.replyTo ?? entry.replyTo;
+  if (!aiReady || agentsToWake(message.body, conversations[message.conversationId], agents, replyTo).length === 0) return;
+  requestAgentReplies(message.id, entry.agentModel).catch((error: unknown) => {
     toast.error(error instanceof AiRequestError ? error.message : "The agent couldn't start. Try again.");
   });
 }
@@ -55,7 +56,7 @@ function createRuntime(store: WorkspaceStore): WorkspaceRuntime {
     listener: {
       onSent: (entry, message) => {
         store.getState().receiveMessage({ ...message, replyTo: message.replyTo ?? entry.replyTo }, { keepReactions: true });
-        wakeAgents(store, message);
+        wakeAgents(store, message, entry);
       },
       onFailed: (entry, error) => {
         store.getState().patchMessage(entry.conversationId, entry.id, { delivery: "failed" });

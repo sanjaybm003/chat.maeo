@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { IconArrowDown } from "@/components/ui/icons";
 import { LocalTime } from "@/components/ui/local-time";
 import { Spinner } from "@/components/ui/spinner";
+import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { AgentIntro } from "@/features/ai/components/agent-intro";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
@@ -228,12 +229,22 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
               );
             }
             if (row.type === "system") {
+              const agentId = row.message.meta.agent_id;
               return (
-                <p key={row.key} className="my-3 text-center text-[12.5px] text-ink-3">
-                  {systemMessageText(row.message.meta, row.message.senderId, members, me.id)}
-                  <span className="text-ink-4">
-                    {" "}
-                    · <LocalTime iso={row.message.createdAt} />
+                <p key={row.key} className="my-3 flex items-center justify-center gap-2 text-center text-[12.5px] text-ink-3">
+                  {agentId ? (
+                    <AgentAvatar
+                      agent={agents[agentId]}
+                      size="xs"
+                      className={row.message.meta.event === "agent_added" ? "animate-agent-land" : "opacity-60"}
+                    />
+                  ) : null}
+                  <span>
+                    {systemMessageText(row.message.meta, row.message.senderId, members, me.id)}
+                    <span className="text-ink-4">
+                      {" "}
+                      · <LocalTime iso={row.message.createdAt} />
+                    </span>
                   </span>
                 </p>
               );

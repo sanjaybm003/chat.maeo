@@ -63,12 +63,13 @@ export interface Participant {
   lastReadAt: string;
 }
 
-export type SystemEvent = "group_created" | "members_added" | "member_left" | "renamed";
+export type SystemEvent = "group_created" | "members_added" | "member_left" | "renamed" | "agent_added" | "agent_removed";
 
 export interface SystemMeta {
   event?: SystemEvent;
   name?: string | null;
   user_ids?: string[];
+  agent_id?: string;
 }
 
 export interface MessagePreview {
@@ -99,6 +100,8 @@ export interface Conversation {
   lastMessage: MessagePreview | null;
   /** Set for a private room between one person and one agent. */
   agentId: string | null;
+  /** Agents that joined this chat alongside the people in it, oldest first. */
+  agentIds: string[];
 }
 
 export interface Attachment {
@@ -171,6 +174,17 @@ export type AgentToolId = (typeof AGENT_TOOL_IDS)[number];
 export const AGENT_GLYPHS = ["orbit", "prism", "wave", "spark", "grid", "bloom"] as const;
 export type AgentGlyph = (typeof AGENT_GLYPHS)[number];
 
+/** The kind of work an agent does; it shapes its method, defaults and model routing. */
+export const SPECIALTIES = ["assistant", "research", "writing", "analysis", "planning", "support", "engineering"] as const;
+export type Specialty = (typeof SPECIALTIES)[number];
+
+export const RESPONSE_STYLES = ["concise", "balanced", "detailed"] as const;
+export type ResponseStyle = (typeof RESPONSE_STYLES)[number];
+
+/** auto: a model is picked for each message; fixed: always the agent's model. */
+export const MODEL_MODES = ["auto", "fixed"] as const;
+export type ModelMode = (typeof MODEL_MODES)[number];
+
 export type AgentVisibility = "workspace" | "private";
 
 export interface Agent {
@@ -181,6 +195,12 @@ export interface Agent {
   handle: string;
   tagline: string;
   instructions: string;
+  /** Reference facts from the team that the agent treats as reliable. */
+  knowledge: string;
+  specialty: Specialty;
+  responseStyle: ResponseStyle;
+  modelMode: ModelMode;
+  /** The model used in fixed mode, and the fallback in auto mode. */
   model: string;
   tools: AgentToolId[];
   starters: string[];
@@ -200,12 +220,20 @@ export interface AgentRunStep {
   label: string;
 }
 
+/** How a run's model was chosen. */
+export interface AgentRoute {
+  mode: "auto" | "fixed" | "override";
+  tier: string | null;
+  reason: string | null;
+}
+
 export interface AgentRun {
   runId: string;
   status: AgentRunStatus;
   model: string | null;
   /** The person whose message started the run; they (or an admin) can stop it. */
   requestedBy: string | null;
+  route: AgentRoute | null;
   steps: AgentRunStep[];
   credits: number | null;
   error: string | null;
@@ -221,6 +249,7 @@ export interface AgentStream {
   receivedAt: number;
 }
 
+/** A person's AI credits. They follow the account across workspaces. */
 export interface CreditAccount {
   balance: number;
   reserved: number;
@@ -238,7 +267,7 @@ export interface UsageSummary {
   since: string;
   account: CreditAccount | null;
   days: (UsageBucket & { day: string })[];
-  agents: (UsageBucket & { agentId: string | null })[];
+  agents: (UsageBucket & { agentId: string | null; name: string | null })[];
   models: (UsageBucket & { model: string })[];
-  people: (UsageBucket & { userId: string | null })[];
+  workspaces: (UsageBucket & { workspaceId: string; name: string })[];
 }

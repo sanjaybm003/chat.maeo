@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { useWorkspace } from "@/features/workspace/store/workspace-provider";
+import { useAnimatedNumber } from "@/hooks/use-animated-number";
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import type { CreditAccount } from "@/types/domain";
@@ -16,10 +17,11 @@ export function creditTotal(credits: CreditAccount) {
   return Math.max(credits.lifetimeGranted, credits.balance + credits.reserved, 1);
 }
 
-/** A slim balance meter for the sidebar; opens the full usage page. */
+/** Your credit balance in the sidebar; counts down live as replies finish, and opens the usage page. */
 export function CreditsMeter({ className }: { className?: string }) {
   const credits = useWorkspace((state) => state.credits);
   const slug = useWorkspace((state) => state.workspace.slug);
+  const shown = useAnimatedNumber(credits?.balance ?? 0);
   if (!credits) return null;
 
   const total = creditTotal(credits);
@@ -32,10 +34,10 @@ export function CreditsMeter({ className }: { className?: string }) {
       className={cn("group flex flex-col gap-1.5 rounded-xl px-2.5 py-2 transition-colors hover:bg-paper", className)}
     >
       <span className="flex items-baseline justify-between gap-2">
-        <span className="text-[13px] text-ink-3 transition-colors group-hover:text-ink-2">AI credits</span>
+        <span className="text-[13px] text-ink-3 transition-colors group-hover:text-ink-2">Your AI credits</span>
         <span className="font-mono text-[11.5px] tabular-nums text-ink-2">
           {low ? <span className="mr-1.5 font-sans text-[11.5px] font-medium text-danger">Low</span> : null}
-          {formatCredits(credits.balance)}
+          {formatCredits(shown)}
         </span>
       </span>
       <span
@@ -46,7 +48,7 @@ export function CreditsMeter({ className }: { className?: string }) {
         aria-valuenow={credits.balance}
         className="block h-1 overflow-hidden rounded-full bg-meter-track"
       >
-        <span className="block h-full rounded-full bg-meter transition-[width] duration-500" style={{ width: `${share * 100}%` }} />
+        <span className="block h-full rounded-full bg-meter transition-[width] duration-700 ease-[var(--ease-snap)]" style={{ width: `${share * 100}%` }} />
       </span>
     </Link>
   );

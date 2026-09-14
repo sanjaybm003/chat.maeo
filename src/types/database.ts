@@ -297,6 +297,10 @@ export type Database = {
           starters: string[];
           color: string;
           glyph: string;
+          specialty: string;
+          response_style: string;
+          knowledge: string;
+          model_mode: string;
           visibility: "workspace" | "private";
           archived_at: string | null;
           created_at: string;
@@ -314,6 +318,10 @@ export type Database = {
           starters?: string[];
           color?: string;
           glyph?: string;
+          specialty?: string;
+          response_style?: string;
+          knowledge?: string;
+          model_mode?: string;
           visibility?: "workspace" | "private";
         };
         Update: {
@@ -326,6 +334,10 @@ export type Database = {
           starters?: string[];
           color?: string;
           glyph?: string;
+          specialty?: string;
+          response_style?: string;
+          knowledge?: string;
+          model_mode?: string;
           visibility?: "workspace" | "private";
           archived_at?: string | null;
         };
@@ -351,6 +363,7 @@ export type Database = {
           credits_reserved: number;
           credits_charged: number;
           error: string | null;
+          route: Json;
           created_at: string;
           finished_at: string | null;
         };
@@ -358,9 +371,9 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
-      ai_credit_accounts: {
+      ai_wallets: {
         Row: {
-          workspace_id: string;
+          user_id: string;
           balance: number;
           reserved: number;
           lifetime_granted: number;
@@ -371,17 +384,28 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
-      ai_credit_ledger: {
+      ai_wallet_ledger: {
         Row: {
           id: number;
-          workspace_id: string;
+          user_id: string;
           delta: number;
           balance_after: number;
           kind: "grant" | "charge" | "refund" | "adjustment";
           run_id: string | null;
-          actor_id: string | null;
+          workspace_id: string | null;
           note: string | null;
           created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      conversation_agents: {
+        Row: {
+          conversation_id: string;
+          agent_id: string;
+          added_by: string | null;
+          added_at: string;
         };
         Insert: never;
         Update: never;
@@ -512,6 +536,7 @@ export type Database = {
           participants: Json;
           last_message: Json | null;
           agent_id: string | null;
+          agent_ids: string[] | null;
         }[];
       };
       create_direct_conversation: {
@@ -588,9 +613,17 @@ export type Database = {
         Args: { p_run_id: string };
         Returns: boolean;
       };
-      ai_usage_summary: {
-        Args: { p_workspace_id: string; p_days?: number; p_time_zone?: string };
+      ai_my_usage: {
+        Args: { p_days?: number; p_time_zone?: string };
         Returns: Json;
+      };
+      add_agent_to_conversation: {
+        Args: { p_conversation_id: string; p_agent_id: string };
+        Returns: boolean;
+      };
+      remove_agent_from_conversation: {
+        Args: { p_conversation_id: string; p_agent_id: string };
+        Returns: boolean;
       };
       ai_start_reply_run: {
         Args: {
@@ -599,6 +632,7 @@ export type Database = {
           p_agent_id: string;
           p_model: string;
           p_quote?: boolean;
+          p_route?: Json;
         };
         Returns: {
           o_run_id: string;

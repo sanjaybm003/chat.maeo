@@ -121,7 +121,13 @@ export function AgentReplyFooter({ message }: { message: Message }) {
   }
 
   const parts: React.ReactNode[] = [];
-  if (model) parts.push(<span key="model">{model.label}</span>);
+  if (model) {
+    parts.push(
+      <span key="model" title={run.route?.reason ?? undefined}>
+        {run.route?.mode === "auto" ? `Auto · ${model.label}` : model.label}
+      </span>,
+    );
+  }
   if (live) parts.push(<span key="live">{run.status === "working" ? "writing" : "working"}</span>);
   if (!live && run.status === "cancelled") parts.push(<span key="stopped">stopped</span>);
   if (!live && run.credits !== null) {

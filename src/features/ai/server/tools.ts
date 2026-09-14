@@ -27,10 +27,10 @@ export const TOOL_SPECS: Record<FunctionToolId, ToolSpec> = {
   search: {
     name: "search_workspace_messages",
     description:
-      "Search messages across the workspace. Only messages that everyone in this conversation can already see are returned. Gives the best matches with who said them, where and when.",
+      "Search messages across the workspace. Only messages that everyone in this conversation can already see are returned. Gives the best matches with who said them, where and when. Use short, specific keywords.",
     parameters: {
       type: "object",
-      properties: { query: { type: "string", description: "The words to look for." } },
+      properties: { query: { type: "string", description: "Two to four specific keywords to look for." } },
       required: ["query"],
     },
   },
@@ -97,21 +97,21 @@ async function readEarlierMessages(call: ToolCall, context: ToolContext): Promis
   return `${lines.join("\n")}${more}`;
 }
 
-async function searchWorkspace(call: ToolCall, context: ToolContext): Promise<string> {
-  const query = typeof call.input.query === "string" ? call.input.query.trim().slice(0, 200) : "";
-  if (query.length < 2) return "Give a search query of at least two characters.";
-
+/** Ranked hits the whole audience of this conversation may read, as transcript-style lines. */
+async function searchLines(context: ToolContext, query: string, options: { limit: number; otherChatsOnly: boolean }) {
   // The reply is read by everyone in this conversation, so results are limited to what they can all see.
   const { data, error } = await context.admin.rpc("ai_search_messages_for", {
     p_user_id: context.userId,
     p_workspace_id: context.workspaceId,
     p_audience_conversation_id: context.conversationId,
     p_query: query,
-    p_limit: 10,
+    p_limit: options.limit + (options.otherChatsOnly ? 10 : 0),
   });
   if (error) throw error;
-  const hits = data ?? [];
-  if (hits.length === 0) return `No messages matched “${query}”.`;
+  const hits = (data ?? [])
+    .filter((hit) => !options.otherChatsOnly || hit.conversation_id !== context.conversationId)
+    .slice(0, options.limit);
+  if (hits.length === 0) return [];
 
   const conversationIds = [...new Set(hits.map((hit) => hit.conversation_id))];
   const { data: conversations } = await context.admin
@@ -121,16 +121,43 @@ async function searchWorkspace(call: ToolCall, context: ToolContext): Promise<st
   const titles = new Map(
     (conversations ?? []).map((conversation) => [
       conversation.id,
-      conversation.name ? `“${conversation.name}”` : conversation.agent_id ? "an agent chat" : conversation.kind === "direct" ? "a direct chat" : "a group chat",
+      conversation.name
+        ? `“${conversation.name}”`
+        : conversation.id === context.conversationId
+          ? "this chat"
+          : conversation.agent_id
+            ? "an agent chat"
+            : conversation.kind === "direct"
+              ? "a direct chat"
+              : "a group chat",
     ]),
   );
 
-  return hits
-    .map((hit) => {
-      const snippet = hit.body.replace(/\s+/g, " ").slice(0, 300);
-      return `- ${hit.created_at.slice(0, 10)} · ${context.directory.authorName(hit)} in ${titles.get(hit.conversation_id) ?? "a chat"}: ${snippet}`;
-    })
-    .join("\n");
+  return hits.map((hit) => {
+    const snippet = hit.body.replace(/\s+/g, " ").slice(0, 300);
+    return `- ${hit.created_at.slice(0, 10)} · ${context.directory.authorName(hit)} in ${titles.get(hit.conversation_id) ?? "a chat"}: ${snippet}`;
+  });
+}
+
+async function searchWorkspace(call: ToolCall, context: ToolContext): Promise<string> {
+  const query = typeof call.input.query === "string" ? call.input.query.trim().slice(0, 200) : "";
+  if (query.length < 2) return "Give a search query of at least two characters.";
+  const lines = await searchLines(context, query, { limit: 10, otherChatsOnly: false });
+  return lines.length > 0 ? lines.join("\n") : `No messages matched “${query}”. Try fewer or different keywords.`;
+}
+
+/**
+ * Before the model starts: looks for earlier discussion in other chats that a
+ * question about the past may depend on. Tries the two strongest terms
+ * together, then the strongest alone.
+ */
+export async function recallRelated(context: ToolContext, terms: string[]): Promise<string[]> {
+  const queries = [...new Set([terms.slice(0, 2).join(" "), terms[0] ?? ""])].filter((query) => query.length >= 3);
+  for (const query of queries) {
+    const lines = await searchLines(context, query, { limit: 5, otherChatsOnly: true });
+    if (lines.length > 0) return lines;
+  }
+  return [];
 }
 
 function listMembers(context: ToolContext): string {

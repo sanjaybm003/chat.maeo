@@ -8,12 +8,14 @@ import { ProviderError } from "@/features/ai/server/providers";
 import { serverEnv } from "@/lib/env.server";
 import { logger } from "@/lib/logger";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SPECIALTIES } from "@/types/domain";
 
 export const maxDuration = 60;
 
 const bodySchema = z.object({
   workspaceId: z.guid(),
   prompt: z.string().trim().min(6, "Say a little more about the agent.").max(2000, "Keep the description under 2,000 characters."),
+  specialty: z.enum(SPECIALTIES).nullish(),
   current: architectOutputSchema.nullish(),
 });
 
@@ -40,7 +42,8 @@ export async function POST(request: Request) {
   if (!membership) return reply(404, { error: "Workspace not found.", code: "not_found" });
 
   if (!serverEnv.hasServiceRoleKey) {
-    return reply(503, { error: "Agents need SUPABASE_SERVICE_ROLE_KEY on the server.", code: "not_configured" });
+    logger.error("AI is not configured: SUPABASE_SERVICE_ROLE_KEY is missing");
+    return reply(503, { error: "AI agents aren’t available right now. Try again soon.", code: "unavailable" });
   }
 
   try {
@@ -48,6 +51,7 @@ export async function POST(request: Request) {
       userId: user.id,
       workspaceId: parsed.data.workspaceId,
       prompt: parsed.data.prompt,
+      specialty: parsed.data.specialty ?? null,
       current: parsed.data.current ? normalizeDraft(parsed.data.current) : null,
     });
     return reply(200, { ...result });
@@ -57,10 +61,13 @@ export async function POST(request: Request) {
       return reply(status, { error: error.message, code: error.kind });
     }
     if (error instanceof ProviderError) {
+      logger.warn("architect provider error", { kind: error.kind, provider: error.provider });
       const status = error.kind === "rate_limited" ? 429 : error.kind === "refused" ? 422 : 502;
-      return reply(status, { error: error.message, code: error.kind });
+      const message =
+        error.kind === "refused" ? "That description couldn’t be turned into an agent." : "AI is busy right now. Try again in a moment.";
+      return reply(status, { error: message, code: error.kind });
     }
     logger.error("architect route failed", { error });
-    return reply(500, { error: "Couldn't draft that agent. Try again.", code: "failed" });
+    return reply(500, { error: "Couldn’t draft that agent. Try again.", code: "failed" });
   }
 }

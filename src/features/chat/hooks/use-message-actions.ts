@@ -16,6 +16,8 @@ export interface SendInput {
   body: string;
   attachments: Attachment[];
   replyTo: Message | null;
+  /** A model for agent replies to this message, or null for each agent's own setting. */
+  agentModel?: string | null;
 }
 
 export type MessageActions = ReturnType<typeof useMessageActions>;
@@ -46,7 +48,7 @@ export function useMessageActions(conversationId: string) {
     });
 
     return {
-      async send({ body, attachments, replyTo }: SendInput) {
+      async send({ body, attachments, replyTo, agentModel }: SendInput) {
         const entry: NewOutboxEntry = {
           id: crypto.randomUUID(),
           workspaceId: state().workspace.id,
@@ -65,6 +67,7 @@ export function useMessageActions(conversationId: string) {
                 deletedAt: replyTo.deletedAt,
               }
             : null,
+          agentModel: agentModel ?? null,
           createdAt: new Date().toISOString(),
         };
         state().receiveMessage(outboxEntryToMessage({ ...entry, attempts: 0, nextAttemptAt: 0, state: "pending", lastError: null }));

@@ -136,6 +136,8 @@ export interface UiSlice {
   editingMessageId: string | null;
   dialog: DialogState | null;
   activityElsewhere: boolean;
+  /** The agent panel above the message bar, open for one conversation at a time. */
+  agentPanel: { conversationId: string; prompt?: string } | null;
 
   setDraft: (conversationId: string, text: string) => void;
   setReplyTarget: (conversationId: string, messageId: string | undefined) => void;
@@ -143,6 +145,8 @@ export interface UiSlice {
   openDialog: (dialog: DialogState) => void;
   closeDialog: () => void;
   flagActivityElsewhere: (active: boolean) => void;
+  openAgentPanel: (conversationId: string, prompt?: string) => void;
+  closeAgentPanel: () => void;
 }
 
 export interface AiSlice {

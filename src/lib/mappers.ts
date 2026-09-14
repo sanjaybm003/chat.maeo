@@ -3,8 +3,11 @@ import type { Json, RpcReturn, Tables } from "@/types/database";
 import {
   AGENT_GLYPHS,
   AGENT_TOOL_IDS,
+  MODEL_MODES,
+  RESPONSE_STYLES,
+  SPECIALTIES,
   type Agent,
-  type AgentGlyph,
+  type AgentRoute,
   type AgentRun,
   type AgentRunStatus,
   type AgentRunStep,
@@ -48,6 +51,9 @@ function num(value: unknown): number {
   }
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
+
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+  typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
 
 export function mapProfile(row: Tables<"profiles">): Profile {
   return {
@@ -117,11 +123,14 @@ export function mapPendingInvitation(row: RpcReturn<"my_pending_invitations">[nu
 function mapMeta(value: unknown): SystemMeta {
   if (!isObject(value)) return {};
   const userIds = Array.isArray(value.user_ids) ? value.user_ids.filter((id): id is string => typeof id === "string") : undefined;
-  return {
+  const meta: SystemMeta = {
     event: str(value.event) as SystemMeta["event"],
     name: str(value.name),
     user_ids: userIds,
   };
+  const agentId = str(value.agent_id);
+  if (agentId) meta.agent_id = agentId;
+  return meta;
 }
 
 const RUN_STATUSES: ReadonlySet<string> = new Set<AgentRunStatus>(["thinking", "working", "done", "failed", "cancelled"]);
@@ -144,6 +153,14 @@ export function mapAgentSteps(value: unknown): AgentRunStep[] {
     .slice(-MAX_STEPS);
 }
 
+function mapRoute(value: unknown): AgentRoute | null {
+  if (!isObject(value)) return null;
+  const mode = oneOf(value.mode, ["auto", "fixed", "override"] as const, "auto");
+  const reason = str(value.reason);
+  if (!reason && !str(value.mode)) return null;
+  return { mode, tier: str(value.tier), reason: reason ? reason.slice(0, 200) : null };
+}
+
 /** An agent reply's meta, or null for everything else. */
 export function mapAgentRun(meta: unknown): AgentRun | null {
   if (!isObject(meta) || !str(meta.run)) return null;
@@ -153,6 +170,7 @@ export function mapAgentRun(meta: unknown): AgentRun | null {
     status: status && RUN_STATUSES.has(status) ? (status as AgentRunStatus) : "thinking",
     model: str(meta.model),
     requestedBy: str(meta.by),
+    route: mapRoute(meta.route),
     steps: mapAgentSteps(meta.steps),
     credits: meta.credits === undefined || meta.credits === null ? null : num(meta.credits),
     error: str(meta.error),
@@ -240,6 +258,7 @@ export function mapConversation(row: RpcReturn<"list_conversations">[number]): C
     ),
     lastMessage: mapPreview(row.last_message),
     agentId: row.agent_id ?? null,
+    agentIds: Array.isArray(row.agent_ids) ? row.agent_ids.filter((id): id is string => typeof id === "string") : [],
   };
 }
 
@@ -288,7 +307,6 @@ export function previewOf(message: Message): MessagePreview {
 // AI ───────────────────────────────────────────────────────────────────────────
 
 const isToolId = (value: string): value is AgentToolId => (AGENT_TOOL_IDS as readonly string[]).includes(value);
-const isGlyph = (value: string): value is AgentGlyph => (AGENT_GLYPHS as readonly string[]).includes(value);
 
 export function mapAgent(row: Tables<"ai_agents">): Agent {
   return {
@@ -299,11 +317,16 @@ export function mapAgent(row: Tables<"ai_agents">): Agent {
     handle: row.handle,
     tagline: row.tagline ?? "",
     instructions: row.instructions,
+    knowledge: row.knowledge ?? "",
+    specialty: oneOf(row.specialty, SPECIALTIES, "assistant"),
+    responseStyle: oneOf(row.response_style, RESPONSE_STYLES, "balanced"),
+    // Rows from before automatic routing have no mode and keep their chosen model.
+    modelMode: oneOf(row.model_mode, MODEL_MODES, "fixed"),
     model: row.model,
     tools: (row.tools ?? []).filter(isToolId),
     starters: row.starters ?? [],
     color: toPersonColor(row.color),
-    glyph: isGlyph(row.glyph) ? row.glyph : "orbit",
+    glyph: oneOf(row.glyph, AGENT_GLYPHS, "orbit"),
     visibility: row.visibility === "private" ? "private" : "workspace",
     archivedAt: row.archived_at,
     createdAt: row.created_at,
@@ -337,8 +360,10 @@ export function mapUsageSummary(value: unknown): UsageSummary {
     since: str(data.since) ?? new Date().toISOString(),
     account: mapCreditAccount(data.account),
     days: buckets(data.days, (item) => (str(item.day) ? { day: item.day as string } : null)),
-    agents: buckets(data.agents, (item) => ({ agentId: str(item.agent_id) })),
+    agents: buckets(data.agents, (item) => ({ agentId: str(item.agent_id), name: str(item.name) })),
     models: buckets(data.models, (item) => (str(item.model) ? { model: item.model as string } : null)),
-    people: buckets(data.people, (item) => ({ userId: str(item.user_id) })),
+    workspaces: buckets(data.workspaces, (item) =>
+      str(item.workspace_id) ? { workspaceId: item.workspace_id as string, name: str(item.name) ?? "Workspace" } : null,
+    ),
   };
 }

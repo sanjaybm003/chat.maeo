@@ -6,6 +6,7 @@ import { personColorStyle } from "@/lib/colors";
 import type { Conversation } from "@/types/domain";
 
 import { findModel } from "../models";
+import { SPECIALTY_PROFILES } from "../specialties";
 import { AgentAvatar, AgentTag } from "./agent-avatar";
 
 /** The top of an agent room: who the agent is, and a few ways to start. */
@@ -38,7 +39,8 @@ export function AgentIntro({ conversation }: { conversation: Conversation }) {
         </h2>
         <p className="mt-1 max-w-[520px] text-[14.5px] leading-relaxed text-ink-2">{agent.tagline || "An AI agent in your workspace."}</p>
         <p className="mt-2 font-mono text-[11px] text-ink-3">
-          @{agent.handle} · {model?.label ?? agent.model} · only you can see this chat
+          @{agent.handle} · {SPECIALTY_PROFILES[agent.specialty].label} ·{" "}
+          {agent.modelMode === "auto" ? "auto model" : (model?.label ?? agent.model)} · only you can see this chat
         </p>
       </div>
 

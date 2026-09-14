@@ -11,6 +11,8 @@ export interface OutboxEntry {
   attachments: Attachment[];
   replyToId: string | null;
   replyTo: ReplyPreview | null;
+  /** A model picked for agent replies to this message; null uses each agent's own setting. */
+  agentModel?: string | null;
   createdAt: string;
   attempts: number;
   nextAttemptAt: number;

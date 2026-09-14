@@ -62,6 +62,10 @@ export function systemMessageText(meta: SystemMeta, senderId: string | null, mem
       return `${actor} left the group`;
     case "renamed":
       return meta.name ? `${actor} renamed the group to “${meta.name}”` : `${actor} removed the group name`;
+    case "agent_added":
+      return `${actor} added ${meta.name ?? "an agent"} to this chat`;
+    case "agent_removed":
+      return `${actor} removed ${meta.name ?? "an agent"} from this chat`;
     default:
       return "Conversation updated";
   }

@@ -181,6 +181,7 @@
   --animate-pop-in: pop-in 0.18s var(--ease-snap) both;
   --animate-fade-in: fade-in 0.2s ease-out both;
   --animate-slide-up: slide-up 0.24s var(--ease-snap) both;
+  --animate-agent-land: agent-land 0.62s var(--ease-snap) both;
 
   @keyframes rise {
     from {
@@ -216,6 +217,21 @@
       transform: translateY(16px);
     }
     to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /* A new agent drops in, overshoots a touch, and settles. */
+  @keyframes agent-land {
+    0% {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.45) rotate(-14deg);
+    }
+    60% {
+      opacity: 1;
+      transform: translateY(0) scale(1.08) rotate(4deg);
+    }
+    100% {
       opacity: 1;
       transform: none;
     }

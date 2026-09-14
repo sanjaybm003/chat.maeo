@@ -12,21 +12,21 @@ import type { AiBootstrap, WorkspaceBootstrap } from "../store/workspace-store";
 
 type ServerSupabase = Awaited<ReturnType<typeof getServerSupabase>>;
 
-/** Chat keeps working on a database that hasn't had the AI migration yet; agents just stay hidden. */
-async function loadAi(supabase: ServerSupabase, workspaceId: string): Promise<AiBootstrap> {
+/** Chat keeps working on a database that hasn't had the AI migrations yet; agents just stay hidden. */
+async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: string): Promise<AiBootstrap> {
   const models = configuredModels().map((model) => model.id);
   const [agents, credits] = await Promise.all([
     supabase.from("ai_agents").select("*").eq("workspace_id", workspaceId).order("created_at"),
     supabase
-      .from("ai_credit_accounts")
+      .from("ai_wallets")
       .select("balance, reserved, lifetime_granted, lifetime_used")
-      .eq("workspace_id", workspaceId)
+      .eq("user_id", userId)
       .maybeSingle(),
   ]);
 
   const error = agents.error ?? credits.error;
   if (error) {
-    logger.warn("AI data unavailable; apply supabase/migrations/20260915000100_ai_agents.sql", { error });
+    logger.warn("AI data unavailable; apply the migrations in supabase/migrations up to 20260916000100", { error });
     return { ready: false, models, agents: [], credits: null };
   }
   return { ready: true, models, agents: (agents.data ?? []).map(mapAgent), credits: mapCreditAccount(credits.data) };
@@ -56,7 +56,7 @@ export async function loadWorkspaceBootstrap(userId: string, slug: string): Prom
   const [membersResult, conversationsResult, ai] = await Promise.all([
     supabase.rpc("list_workspace_members", { p_workspace_id: workspace.id }),
     supabase.rpc("list_conversations", { p_workspace_id: workspace.id }),
-    loadAi(supabase, workspace.id),
+    loadAi(supabase, workspace.id, userId),
   ]);
   if (membersResult.error) throw membersResult.error;
   if (conversationsResult.error) throw conversationsResult.error;

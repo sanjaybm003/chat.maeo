@@ -46,7 +46,7 @@ const log = logger.child({ module: "realtime-engine" });
  * Owns the WebSocket channels for one workspace session, independent of React.
  *
  *   user:<id>        personal feed, fanned out by Postgres triggers
- *   workspace:<id>   presence (active / away), membership, agent and credit hints
+ *   workspace:<id>   presence (active / away), membership and agent hints
  *
  * It validates every payload, coalesces bursts of refresh hints, isolates
  * handler failures, and reports connection state including reconnects so the
@@ -112,6 +112,10 @@ export class RealtimeEngine {
           if (removedId === workspaceId) this.handlers.onWorkspaceRemoved();
         }),
       )
+      // Credits belong to the person, so balance changes arrive on their own feed.
+      .on("broadcast", { event: "credits.changed" }, ({ payload }) =>
+        this.parse(creditsEventSchema, payload, (balance) => this.handlers.onCreditsChanged(balance)),
+      )
       .subscribe((status) => this.onFeedStatus(status));
 
     this.room = this.supabase
@@ -124,9 +128,6 @@ export class RealtimeEngine {
         this.parse(userRefSchema, payload, (memberId) => this.memberRefresh.schedule(memberId)),
       )
       .on("broadcast", { event: "workspace.updated" }, () => this.workspaceRefresh.schedule("workspace"))
-      .on("broadcast", { event: "credits.changed" }, ({ payload }) =>
-        this.parse(creditsEventSchema, payload, (balance) => this.handlers.onCreditsChanged(balance)),
-      )
       .on("broadcast", { event: "agent.changed" }, ({ payload }) =>
         this.parse(agentRefSchema, payload, (agentId) => this.agentRefresh.schedule(agentId)),
       )

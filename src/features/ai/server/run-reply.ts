@@ -8,7 +8,8 @@ import type { AgentRunStep } from "@/types/domain";
 
 import type { AgentToolId } from "../agent-spec";
 import { creditsForUsage, estimateReservation, estimateTokens, type TokenUsage } from "../credits";
-import { findModel, PROVIDERS } from "../models";
+import type { AiModel } from "../models";
+import { SPECIALTY_PROFILES, toSpecialty } from "../specialties";
 import { buildReplyContext, type AgentRow } from "./context";
 import type { AdminClient } from "./directory";
 import { AgentRunError, friendlyRunError, RunCancelledError, RunDeadlineError } from "./errors";
@@ -34,6 +35,8 @@ export interface ReplyRunInput {
   workspaceId: string;
   userId: string;
   agent: AgentRow;
+  /** Chosen by the router for this reply. */
+  model: AiModel;
 }
 
 const joinText = (before: string, next: string) => (before && next ? `${before}\n\n${next}` : before || next);
@@ -57,11 +60,12 @@ async function settle(admin: AdminClient, runId: string, credits: number, usage:
 
 /**
  * Runs one agent reply end to end: context → model calls with tools → live
- * stream → credits held and settled per call → final message saved. Always
- * finishes the run, whatever happens, so no reply is left spinning.
+ * stream → credits held and settled per call from the asker's wallet → final
+ * message saved. Always finishes the run, whatever happens, so no reply is
+ * left spinning.
  */
 export async function runAgentReply(input: ReplyRunInput): Promise<void> {
-  const log = logger.child({ module: "agent-run", runId: input.runId, agentId: input.agent.id });
+  const log = logger.child({ module: "agent-run", runId: input.runId, agentId: input.agent.id, model: input.model.id });
   const admin = createSupabaseAdminClient();
   const publisher = new StreamPublisher(admin, {
     conversationId: input.conversationId,
@@ -71,6 +75,7 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
   const controller = new AbortController();
   const steps: AgentRunStep[] = [];
   const startedAt = Date.now();
+  const model = input.model;
 
   let text = "";
   let status: "succeeded" | "failed" | "cancelled" = "succeeded";
@@ -83,12 +88,9 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
   };
 
   try {
-    const model = findModel(input.agent.model);
-    if (!model) {
-      throw new AgentRunError("This agent's model isn't offered anymore. Choose another in the agent's settings.", "unavailable");
-    }
     if (!isProviderConfigured(model.provider)) {
-      throw new AgentRunError(`${PROVIDERS[model.provider].label} isn't connected on this server.`, "unavailable");
+      log.error("provider key missing for routed model");
+      throw new AgentRunError("This model isn’t available right now. Try again, or pick another model.", "unavailable");
     }
 
     poller = setInterval(() => {
@@ -108,6 +110,9 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
 
     const context = await buildReplyContext(admin, input);
     addStep({ kind: "read", label: `Read ${pluralize(context.messageCount, "message")}` });
+    if (context.relatedCount > 0) {
+      addStep({ kind: "tool", label: `Found ${pluralize(context.relatedCount, "related message")} in other chats` });
+    }
 
     const tools = (input.agent.tools as AgentToolId[]).flatMap((id) => (id === "web" ? [] : [TOOL_SPECS[id]]));
     const webSearch = input.agent.tools.includes("web") && model.webSearch !== null;
@@ -118,6 +123,7 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
       tools,
       webSearch,
       maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
+      temperature: SPECIALTY_PROFILES[toSpecialty(input.agent.specialty)].temperature,
     });
 
     const toolContext: ToolContext = {
@@ -142,7 +148,7 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
         }),
         estimateReservation(model, { inputTokens: promptTokens, maxOutputTokens: 1024 }),
       );
-      if (held === 0) throw new AgentRunError("This workspace is out of AI credits.", "out_of_credits");
+      if (held === 0) throw new AgentRunError("You’re out of AI credits.", "out_of_credits");
 
       let streamed = "";
       let result: StepResult | null = null;

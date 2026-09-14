@@ -5,24 +5,30 @@ import { extractMentionHandles } from "./mentions";
 export const MAX_AGENTS_PER_MESSAGE = 3;
 
 /**
- * Which agents a message calls on: the agent of an agent room always, plus
- * every active agent @mentioned, in the order they appear. The server applies
- * the same rule again with its own data.
+ * Which agents a message calls on, in order:
+ *   1. the agent of an agent room, which answers everything said there
+ *   2. the agent whose message is being replied to, so a thread with an agent
+ *      carries on without mentioning it again
+ *   3. every active agent @mentioned, in the order they appear
+ * The server applies the same rules again with its own data.
  */
 export function agentsToWake(
   body: string,
   conversation: Pick<Conversation, "agentId"> | undefined,
   agents: Record<string, Agent>,
+  replyTo?: { agentId: string | null } | null,
 ): Agent[] {
-  const active = Object.values(agents).filter((agent) => !agent.archivedAt);
   const woken: Agent[] = [];
+  const add = (agent: Agent | undefined) => {
+    if (agent && !agent.archivedAt && !woken.includes(agent)) woken.push(agent);
+  };
 
-  const roomAgent = conversation?.agentId ? agents[conversation.agentId] : undefined;
-  if (roomAgent && !roomAgent.archivedAt) woken.push(roomAgent);
+  if (conversation?.agentId) add(agents[conversation.agentId]);
+  if (replyTo?.agentId) add(agents[replyTo.agentId]);
 
-  for (const handle of extractMentionHandles(body, MAX_AGENTS_PER_MESSAGE + 1)) {
-    const agent = active.find((item) => item.handle === handle);
-    if (agent && !woken.includes(agent)) woken.push(agent);
+  const active = Object.values(agents).filter((agent) => !agent.archivedAt);
+  for (const handle of extractMentionHandles(body, MAX_AGENTS_PER_MESSAGE + 2)) {
+    add(active.find((agent) => agent.handle === handle));
   }
   return woken.slice(0, MAX_AGENTS_PER_MESSAGE);
 }

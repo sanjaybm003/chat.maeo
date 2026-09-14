@@ -6,6 +6,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   editingMessageId: null,
   dialog: null,
   activityElsewhere: false,
+  agentPanel: null,
 
   setDraft: (conversationId, text) =>
     set((state) => (state.drafts[conversationId] === text ? {} : { drafts: { ...state.drafts, [conversationId]: text } })),
@@ -17,4 +18,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   openDialog: (dialog) => set({ dialog }),
   closeDialog: () => set({ dialog: null }),
   flagActivityElsewhere: (active) => set({ activityElsewhere: active }),
+  openAgentPanel: (conversationId, prompt) => set({ agentPanel: { conversationId, prompt } }),
+  closeAgentPanel: () => set({ agentPanel: null }),
 });

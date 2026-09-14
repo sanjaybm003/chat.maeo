@@ -7,8 +7,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Agent } from "@/types/domain";
 
 import { agentInputSchema, type AgentInput } from "./agent-spec";
-import { findModel, PROVIDERS } from "./models";
-import { isProviderConfigured } from "./server/env";
+import { findModel } from "./models";
+import { configuredModels } from "./server/env";
 
 type ParsedAgent = ReturnType<typeof agentInputSchema.parse>;
 
@@ -18,20 +18,25 @@ function validate(input: AgentInput): { ok: true; data: ParsedAgent } | { ok: fa
     return { ok: false, result: fail("Check the highlighted fields.", toFieldErrors(parsed.error.issues)) };
   }
 
-  const model = findModel(parsed.data.model);
-  if (!model) return { ok: false, result: fail("Choose a model.", { model: "Choose one of the listed models." }) };
-  if (!isProviderConfigured(model.provider)) {
-    return {
-      ok: false,
-      result: fail(`${PROVIDERS[model.provider].label} isn't connected on this server.`, {
-        model: `Add ${PROVIDERS[model.provider].envKey} on the server, or choose another model.`,
-      }),
-    };
+  const available = configuredModels();
+  let model = findModel(parsed.data.model);
+
+  if (parsed.data.modelMode === "fixed") {
+    if (!model || !available.some((item) => item.id === model!.id)) {
+      return {
+        ok: false,
+        result: fail("That model isn’t available right now.", { model: "Choose another model, or let Auto pick one." }),
+      };
+    }
+  } else if (!model) {
+    // Auto still keeps a sensible fallback model on the row.
+    model = available[0] ?? findModel("claude-sonnet-5");
   }
 
-  // Web search only exists on models that host it; quietly drop it elsewhere.
-  const tools = model.webSearch ? parsed.data.tools : parsed.data.tools.filter((tool) => tool !== "web");
-  return { ok: true, data: { ...parsed.data, tools } };
+  // In fixed mode web search only works on models that host it; auto routing picks one when needed.
+  const tools =
+    parsed.data.modelMode === "fixed" && !model?.webSearch ? parsed.data.tools.filter((tool) => tool !== "web") : parsed.data.tools;
+  return { ok: true, data: { ...parsed.data, model: model?.id ?? parsed.data.model, tools } };
 }
 
 function editableFields(data: ParsedAgent) {
@@ -40,6 +45,10 @@ function editableFields(data: ParsedAgent) {
     handle: data.handle,
     tagline: data.tagline,
     instructions: data.instructions,
+    knowledge: data.knowledge,
+    specialty: data.specialty,
+    response_style: data.responseStyle,
+    model_mode: data.modelMode,
     model: data.model,
     tools: data.tools,
     starters: data.starters,
