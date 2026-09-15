@@ -160,6 +160,8 @@ export interface UiSlice {
   activityElsewhere: boolean;
   /** The agent panel above the message bar, open for one conversation at a time. */
   agentPanel: { conversationId: string; prompt?: string } | null;
+  /** Text another part of the screen handed to one chat's message bar, taken once. */
+  composerInsert: { conversationId: string; text: string; id: number } | null;
 
   setDraft: (conversationId: string, text: string) => void;
   setReplyTarget: (conversationId: string, messageId: string | undefined) => void;
@@ -169,6 +171,8 @@ export interface UiSlice {
   flagActivityElsewhere: (active: boolean) => void;
   openAgentPanel: (conversationId: string, prompt?: string) => void;
   closeAgentPanel: () => void;
+  insertIntoComposer: (conversationId: string, text: string) => void;
+  takeComposerInsert: (id: number) => void;
 }
 
 /** Agents just called on by a message sent from this device, shown until their replies appear. */

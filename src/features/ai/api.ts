@@ -1,5 +1,5 @@
 import { db, unwrap } from "@/features/workspace/api/client";
-import { mapAgent, mapCreditAccount, mapUsageSummary } from "@/lib/mappers";
+import { mapAgent, mapAgentMembers, mapCreditAccount, mapUsageSummary } from "@/lib/mappers";
 import type { Specialty } from "@/types/domain";
 
 import type { AgentDraft } from "./agent-spec";
@@ -99,9 +99,15 @@ export async function removeAgentFromConversation(conversationId: string, agentI
   return unwrap(await db().rpc("remove_agent_from_conversation", { p_conversation_id: conversationId, p_agent_id: agentId }));
 }
 
+/** The agent with who it's shared with, or null when this person can no longer see it. */
 export async function fetchAgent(agentId: string) {
-  const row = unwrap(await db().from("ai_agents").select("*").eq("id", agentId).maybeSingle());
-  return row ? mapAgent(row) : null;
+  const [row, members] = await Promise.all([
+    db().from("ai_agents").select("*").eq("id", agentId).maybeSingle(),
+    db().from("ai_agent_members").select("user_id, role").eq("agent_id", agentId),
+  ]);
+  const agent = unwrap(row);
+  // A database without sharing has no members table; the agent still loads.
+  return agent ? { ...mapAgent(agent), members: mapAgentMembers(members.error ? [] : (members.data ?? [])) } : null;
 }
 
 export async function fetchCreditAccount(userId: string) {

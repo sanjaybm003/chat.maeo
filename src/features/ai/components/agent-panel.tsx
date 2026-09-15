@@ -14,6 +14,7 @@ import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import type { Agent, AgentToolId, Conversation, Specialty } from "@/types/domain";
 
+import { canUseAgent } from "../access";
 import { createAgent } from "../actions";
 import { AGENT_TOOLS, type AgentDraft } from "../agent-spec";
 import { addAgentToConversation, AiRequestError, draftAgent, removeAgentFromConversation } from "../api";
@@ -58,6 +59,8 @@ export function AgentPanel({ conversation, initialPrompt, onClose, onMention }: 
   const store = useWorkspaceStore();
   const workspace = useWorkspace((state) => state.workspace);
   const agents = useWorkspace((state) => state.agents);
+  const meId = useWorkspace((state) => state.me.id);
+  const myRole = useWorkspace((state) => state.myRole);
   const aiReady = useWorkspace((state) => state.aiReady);
   const aiModels = useWorkspace((state) => state.aiModels);
   const balance = useWorkspace((state) => state.credits?.balance ?? null);
@@ -77,7 +80,14 @@ export function AgentPanel({ conversation, initialPrompt, onClose, onMention }: 
   const addable = inRoom
     ? []
     : Object.values(agents)
-        .filter((agent) => !agent.archivedAt && agent.visibility === "workspace" && !conversation.agentIds.includes(agent.id))
+        // Only agents this person may use; a private agent never joins a shared chat.
+        .filter(
+          (agent) =>
+            !agent.archivedAt &&
+            agent.visibility !== "private" &&
+            canUseAgent(agent, meId, myRole) &&
+            !conversation.agentIds.includes(agent.id),
+        )
         .sort((a, b) => a.name.localeCompare(b.name));
   const architect = pickArchitectModel(available);
   const estimate = architect ? creditsForUsage(architect, { inputTokens: 3000, outputTokens: 1400 }) : null;

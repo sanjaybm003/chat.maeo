@@ -7,6 +7,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   dialog: null,
   activityElsewhere: false,
   agentPanel: null,
+  composerInsert: null,
 
   setDraft: (conversationId, text) =>
     set((state) => (state.drafts[conversationId] === text ? {} : { drafts: { ...state.drafts, [conversationId]: text } })),
@@ -20,4 +21,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   flagActivityElsewhere: (active) => set({ activityElsewhere: active }),
   openAgentPanel: (conversationId, prompt) => set({ agentPanel: { conversationId, prompt } }),
   closeAgentPanel: () => set({ agentPanel: null }),
+  insertIntoComposer: (conversationId, text) =>
+    set((state) => ({ composerInsert: { conversationId, text, id: (state.composerInsert?.id ?? 0) + 1 } })),
+  takeComposerInsert: (id) => set((state) => (state.composerInsert?.id === id ? { composerInsert: null } : {})),
 });

@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { useWorkspace } from "@/features/workspace/store/workspace-provider";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { getErrorMessage } from "@/lib/errors";
+import { usePreferences, type TaskLayout } from "@/lib/preferences";
 import { routes } from "@/lib/routes";
 import { cn, firstNameOf, nameOf } from "@/lib/utils";
 import type { Task } from "@/types/domain";
@@ -32,6 +33,7 @@ import {
   taskKey,
   type TaskView,
 } from "../lib/task-meta";
+import { TaskBoard } from "./task-board";
 import { AssigneePicker, DueLabel, DuePicker, PriorityMenu, StatusMenu, TaskAssigneeAvatar } from "./task-fields";
 import { PriorityIcon, TaskStatusIcon } from "./task-marks";
 
@@ -47,6 +49,8 @@ export function TasksScreen() {
   const [view, setView] = useState<TaskView>("mine");
   const [query, setQuery] = useState("");
   const [showFinished, setShowFinished] = useState(false);
+  const [preferences, updatePreferences] = usePreferences();
+  const layout = preferences.taskLayout;
 
   const all = useMemo(() => Object.values(tasks), [tasks]);
   const today = hydrated ? isoDate(new Date()) : null;
@@ -61,6 +65,8 @@ export function TasksScreen() {
   const groups = groupByStatus(
     inThisView.filter((task) => (showFinished || isOpenTask(task)) && matchesTaskQuery(task, query, assigneeName(task))),
   );
+  // The board always has a Done column, so it takes finished work regardless of the switch.
+  const boardTasks = inThisView.filter((task) => task.status !== "cancelled" && matchesTaskQuery(task, query, assigneeName(task)));
   const openIn = (option: TaskView) => all.filter((task) => inView(task, option, meId) && isOpenTask(task)).length;
 
   const summary =
@@ -72,7 +78,7 @@ export function TasksScreen() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-[980px] px-5 pb-24 pt-5 sm:px-10 sm:pt-10">
+      <div className={cn("mx-auto w-full px-5 pb-24 pt-5 sm:px-10 sm:pt-10", layout === "board" ? "max-w-[1240px]" : "max-w-[980px]")}>
         <Link
           href={routes.workspace(workspace.slug)}
           className="mb-4 inline-flex size-9 items-center justify-center rounded-full text-ink-2 hover:bg-paper-2 md:hidden"
@@ -122,6 +128,16 @@ export function TasksScreen() {
                   return { value: option.value, label: count > 0 ? `${option.label} ${count}` : option.label };
                 })}
               />
+              <Segmented<TaskLayout>
+                label="Show tasks as"
+                size="sm"
+                value={layout}
+                onChange={(taskLayout) => updatePreferences({ taskLayout })}
+                options={[
+                  { value: "list", label: "List" },
+                  { value: "board", label: "Board" },
+                ]}
+              />
               <div className="relative ml-auto min-w-[180px] flex-1 sm:max-w-[260px]">
                 <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
                 <input
@@ -132,13 +148,26 @@ export function TasksScreen() {
                   className="h-9 w-full rounded-full border border-line-2 bg-surface pl-8 pr-3 text-[13.5px] text-ink outline-none transition-colors placeholder:text-ink-4 focus:border-ink-4"
                 />
               </div>
-              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-2">
-                <Switch checked={showFinished} onCheckedChange={setShowFinished} aria-label="Show finished tasks" />
-                Finished{finished > 0 ? ` ${finished}` : ""}
-              </label>
+              {layout === "list" ? (
+                <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-2">
+                  <Switch checked={showFinished} onCheckedChange={setShowFinished} aria-label="Show finished tasks" />
+                  Finished{finished > 0 ? ` ${finished}` : ""}
+                </label>
+              ) : null}
             </div>
 
-            {groups.length === 0 ? (
+            {layout === "board" ? (
+              boardTasks.length === 0 && query.trim() ? (
+                <div className="mt-6 rounded-[24px] border border-dashed border-line-2 px-6 py-14 text-center">
+                  <p className="font-display text-xl font-semibold">No tasks match.</p>
+                  <p className="mt-1 text-sm text-ink-3">Try other words, a number like T-12, or another view.</p>
+                </div>
+              ) : (
+                <div className="mt-6">
+                  <TaskBoard tasks={boardTasks} />
+                </div>
+              )
+            ) : groups.length === 0 ? (
               <div className="mt-6 rounded-[24px] border border-dashed border-line-2 px-6 py-14 text-center">
                 <p className="font-display text-xl font-semibold">{query.trim() ? "No tasks match." : EMPTY[view].title}</p>
                 <p className="mt-1 text-sm text-ink-3">{query.trim() ? "Try other words, a number like T-12, or another view." : EMPTY[view].body}</p>

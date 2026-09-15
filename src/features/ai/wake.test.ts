@@ -27,6 +27,8 @@ function agent(id: string, handle: string, patch: Partial<Agent> = {}): Agent {
     color: "iris",
     glyph: "orbit",
     visibility: "workspace",
+    usage: "viewers",
+    members: [],
     archivedAt: null,
     createdAt: "",
     updatedAt: "",

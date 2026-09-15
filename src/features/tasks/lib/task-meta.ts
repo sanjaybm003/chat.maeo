@@ -91,6 +91,64 @@ export function matchesTaskQuery(task: Task, query: string, assigneeName: string
   return needle.split(/\s+/).every((word) => haystack.includes(word));
 }
 
+export interface WorkSummary {
+  /** Open tasks assigned to this person, most pressing first. */
+  mine: Task[];
+  late: number;
+  dueToday: number;
+  /** Open tasks that came from this chat, whoever has them. */
+  here: Task[];
+  /** Open tasks this person gave to agents. */
+  withAgents: Task[];
+  /** Their work finished since the given moment. */
+  finished: Task[];
+}
+
+/** What's on one person's plate, for "My work" in a chat. */
+export function summarizeWork(
+  tasks: readonly Task[],
+  meId: string,
+  { conversationId, today, since }: { conversationId: string | null; today: string | null; since: string | null },
+): WorkSummary {
+  const open = tasks.filter(isOpenTask);
+  const mine = open.filter((task) => task.assigneeId === meId).sort(compareTasks);
+  const sinceTime = since ? Date.parse(since) : Number.NaN;
+  const ours = (task: Task) => task.assigneeId === meId || (task.agentId !== null && task.createdBy === meId);
+  return {
+    mine,
+    late: today ? mine.filter((task) => task.dueOn !== null && task.dueOn < today).length : 0,
+    dueToday: today ? mine.filter((task) => task.dueOn === today).length : 0,
+    here: conversationId ? open.filter((task) => task.conversationId === conversationId).sort(compareTasks) : [],
+    withAgents: open.filter((task) => task.agentId !== null && task.createdBy === meId).sort(compareTasks),
+    finished: Number.isNaN(sinceTime)
+      ? []
+      : tasks.filter((task) => task.status === "done" && ours(task) && Date.parse(task.completedAt ?? "") >= sinceTime).sort(compareTasks),
+  };
+}
+
+/** A short status update in plain words, ready to post: done, underway, stuck, next. */
+export function workUpdate(work: WorkSummary, today: string | null) {
+  const due = (task: Task) => {
+    if (!task.dueOn || !today) return "";
+    const { label, tone } = describeDue(task.dueOn, today);
+    if (tone === "overdue") return " (late)";
+    return ` (due ${label === "Today" || label === "Tomorrow" ? label.toLowerCase() : label})`;
+  };
+  const line = (label: string, tasks: readonly Task[], max: number, withDue: boolean) => {
+    if (tasks.length === 0) return null;
+    const names = tasks.slice(0, max).map((task) => `${taskKey(task.number)} ${task.title}${withDue ? due(task) : ""}`);
+    const more = tasks.length > max ? `, and ${tasks.length - max} more` : "";
+    return `${label}: ${names.join(", ")}${more}`;
+  };
+  const lines = [
+    line("Done", work.finished, 4, false),
+    line("Working on", work.mine.filter((task) => task.status === "in_progress"), 3, true),
+    line("Blocked", work.mine.filter((task) => task.status === "blocked"), 3, false),
+    line("Next", work.mine.filter((task) => task.status === "todo"), 3, true),
+  ].filter((value): value is string => value !== null);
+  return ["My update", ...(lines.length > 0 ? lines : ["Nothing open on my side right now."])].join("\n");
+}
+
 export function groupByStatus(tasks: readonly Task[]) {
   return STATUS_ORDER.map((status) => ({
     status,

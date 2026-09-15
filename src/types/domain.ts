@@ -198,7 +198,21 @@ export type ResponseStyle = (typeof RESPONSE_STYLES)[number];
 export const MODEL_MODES = ["auto", "fixed"] as const;
 export type ModelMode = (typeof MODEL_MODES)[number];
 
-export type AgentVisibility = "workspace" | "private";
+/** Who sees an agent: only its maker, its maker and people they pick, or everyone in the workspace. */
+export type AgentVisibility = "private" | "people" | "workspace";
+
+/** Who uses an agent among those who see it: its maker and editors, people picked to use it, or everyone who sees it. */
+export const AGENT_USAGES = ["owner", "people", "viewers"] as const;
+export type AgentUsage = (typeof AGENT_USAGES)[number];
+
+export const AGENT_MEMBER_ROLES = ["viewer", "user", "editor"] as const;
+export type AgentMemberRole = (typeof AGENT_MEMBER_ROLES)[number];
+
+/** Someone an agent is shared with, and what they may do with it. */
+export interface AgentMember {
+  userId: string;
+  role: AgentMemberRole;
+}
 
 /** How far an agent strays from the most likely wording: exact for facts and code, freer for ideas. */
 export const CREATIVITY_LEVELS = ["precise", "balanced", "creative"] as const;
@@ -236,6 +250,10 @@ export interface Agent {
   color: PersonColor;
   glyph: AgentGlyph;
   visibility: AgentVisibility;
+  /** Who of the people who see it may also use it. */
+  usage: AgentUsage;
+  /** The people it's shared with by name, and what each may do. */
+  members: AgentMember[];
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;

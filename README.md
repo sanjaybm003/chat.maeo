@@ -32,9 +32,14 @@ Built with Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4 and Sup
 - Press T anywhere, type `/task Send the invoice @sam friday !high` in a chat, or turn any message into a task
 - Numbered per workspace (T-12), with status, priority, due dates, and a teammate or an agent doing the work
 - Task cards in chat stay live: tick them off or edit them right there, or on their own page
+- A list or a board: drag cards between To do, In progress, Blocked and Done
+- "My work" in every chat: what's waiting on you, what came from that chat, what your agents are doing, and a one-tap update to post
 
 **AI agents**
-- Describe an agent in plain words, add it to any chat, or talk to it one-to-one; replies use each person's AI credits
+- Describe an agent in plain words or start from a template, add it to any chat, or talk to it one-to-one; replies use each person's AI credits
+- Sharing the maker controls: who sees it (only me, people I choose, everyone), who can use it, and per-person roles (can see, can use, can edit). The database enforces it for chats, replies and tasks
+- Replies answer first, then the detail, with numbered citations and a Sources list of the pages the agent actually read. Links it can't back up lose their URL
+- Each reply shows which model answered and why; settings break usage down by model, agent and workspace
 - Models from Anthropic, OpenAI, Google and DeepSeek, plus open models on Amazon Bedrock: Mistral (Large 3, Devstral 2, Magistral, Ministral), Google Gemma 3, Qwen3 (Coder, Next), Kimi K2.5, MiniMax M2.5, NVIDIA Nemotron, Z.ai GLM, DeepSeek and gpt-oss. Pickers only offer the models Bedrock lists for your key and region
 - Automatic model routing by how demanding a message is, what the agent's specialty needs (code, writing, reasoning, tools, other languages) and, for quick questions, which models answer fastest
 - Web research that dates searches to now, reads the top sources itself, links where facts came from, and double-checks answers that cite links nothing backs up

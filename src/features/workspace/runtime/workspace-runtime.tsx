@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
+import { canUseAgent } from "@/features/ai/access";
 import { AiRequestError, requestAgentReplies } from "@/features/ai/api";
 import { agentsToWake } from "@/features/ai/wake";
 import { Outbox, outboxEntryToMessage, type OutboxEntry } from "@/features/chat/outbox/outbox";
@@ -29,9 +30,10 @@ const RuntimeContext = createContext<WorkspaceRuntime | null>(null);
  * that didn't land; repeats are harmless because runs are idempotent.
  */
 function wakeAgents(store: WorkspaceStore, message: Message, entry: OutboxEntry) {
-  const { aiReady, agents, conversations } = store.getState();
+  const { aiReady, agents, conversations, me, myRole } = store.getState();
   const replyTo = message.replyTo ?? entry.replyTo;
-  if (!aiReady || agentsToWake(message.body, conversations[message.conversationId], agents, replyTo).length === 0) return;
+  const usable = agentsToWake(message.body, conversations[message.conversationId], agents, replyTo, (agent) => canUseAgent(agent, me.id, myRole));
+  if (!aiReady || usable.length === 0) return;
   requestAgentReplies(message.id, entry.agentModel)
     .then(({ runs }) => {
       if (runs.length === 0) store.getState().clearPendingReplies(message.conversationId, message.id);

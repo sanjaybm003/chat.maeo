@@ -8,7 +8,7 @@ import { webSearchAvailable } from "@/features/ai/server/web";
 import { githubApp } from "@/features/integrations/server/github";
 import { TASK_WINDOW_DAYS } from "@/features/tasks/api";
 import { logger } from "@/lib/logger";
-import { mapAgent, mapConversation, mapCreditAccount, mapIntegration, mapMember, mapTask, mapWorkspace } from "@/lib/mappers";
+import { mapAgent, mapAgentMembers, mapConversation, mapCreditAccount, mapIntegration, mapMember, mapTask, mapWorkspace } from "@/lib/mappers";
 import { routes } from "@/lib/routes";
 import { getMyPendingInvitations, getMyWorkspaces, getOwnProfile, getServerSupabase } from "@/server/session";
 
@@ -46,15 +46,21 @@ async function loadIntegrations(supabase: ServerSupabase, workspaceId: string): 
 
 /** Chat keeps working on a database that hasn't had the AI migrations yet; agents just stay hidden. */
 async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: string): Promise<AiBootstrap> {
-  const [agents, credits] = await Promise.all([
+  const [agents, credits, shares] = await Promise.all([
     supabase.from("ai_agents").select("*").eq("workspace_id", workspaceId).order("created_at"),
     supabase
       .from("ai_wallets")
       .select("balance, reserved, lifetime_granted, lifetime_used")
       .eq("user_id", userId)
       .maybeSingle(),
+    // Row level security returns sharing only for agents this person can see. Missing before the sharing update.
+    supabase.from("ai_agent_members").select("agent_id, user_id, role"),
     refreshBedrockCatalog(CATALOG_WAIT_MS),
   ]);
+  const membersByAgent = new Map<string, Array<{ user_id: string; role: string }>>();
+  for (const row of shares.error ? [] : (shares.data ?? [])) {
+    membersByAgent.set(row.agent_id, [...(membersByAgent.get(row.agent_id) ?? []), row]);
+  }
   const available = configuredModels();
   const models = available.map((model) => model.id);
   const webSearch = webSearchAvailable() || available.some((model) => model.webSearch !== null);
@@ -64,7 +70,13 @@ async function loadAi(supabase: ServerSupabase, workspaceId: string, userId: str
     logger.warn("AI data unavailable; apply the migrations in supabase/migrations up to 20260916000100", { error });
     return { ready: false, models, webSearch, agents: [], credits: null };
   }
-  return { ready: true, models, webSearch, agents: (agents.data ?? []).map(mapAgent), credits: mapCreditAccount(credits.data) };
+  return {
+    ready: true,
+    models,
+    webSearch,
+    agents: (agents.data ?? []).map((row) => ({ ...mapAgent(row), members: mapAgentMembers(membersByAgent.get(row.id) ?? []) })),
+    credits: mapCreditAccount(credits.data),
+  };
 }
 
 /**

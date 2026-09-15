@@ -12,8 +12,10 @@ import type { AgentRunStep, Message } from "@/types/domain";
 
 import { cancelAgentRun } from "../api";
 import { formatCredits } from "../credits";
+import { splitSources, type ReplySource } from "../lib/reply-sources";
 import { RichText } from "../lib/rich-text";
-import { findModel } from "../models";
+import { hostLabel } from "../lib/web-evidence";
+import { ModelBadge } from "./model-badge";
 
 /** The reply as it stands: live text and steps while streaming, the saved message once finished. */
 function useAgentReply(message: Message) {
@@ -58,6 +60,31 @@ function StepList({ steps, className }: { steps: AgentRunStep[]; className?: str
   );
 }
 
+/** Where the reply's facts came from, numbered to match the [n] marks in its text. */
+function SourceList({ sources }: { sources: ReplySource[] }) {
+  return (
+    <section aria-label="Sources" className="border-t border-line pt-2.5">
+      <p className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-3">Sources</p>
+      <ol className="-mx-1 flex flex-col">
+        {sources.map((source, index) => (
+          <li key={`${index}-${source.url}`}>
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="group flex min-w-0 items-baseline gap-2 rounded-lg px-1 py-1 text-[13px] transition-colors hover:bg-paper"
+            >
+              <span className="w-4 shrink-0 text-right font-mono text-[11px] tabular-nums text-ink-3">{index + 1}</span>
+              <span className="min-w-0 truncate text-ink-2 underline-offset-2 group-hover:text-ink group-hover:underline">{source.title}</span>
+              <span className="ml-auto hidden shrink-0 pl-2 font-mono text-[11px] text-ink-4 sm:inline">{hostLabel(source.url)}</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 export function AgentReplyBody({ message }: { message: Message }) {
   const { run, live, text, steps } = useAgentReply(message);
 
@@ -75,15 +102,19 @@ export function AgentReplyBody({ message }: { message: Message }) {
     );
   }
 
+  // Sources are listed once the reply is finished; while it streams, the text is all there is.
+  const { body, sources } = live ? { body: text, sources: [] } : splitSources(text);
+
   return (
-    <div className="flex flex-col gap-2 px-3.5 py-2.5">
-      {text ? (
-        <RichText text={text} trailing={live ? <span className="agent-caret" aria-hidden="true" /> : null} />
+    <div className="flex flex-col gap-2.5 px-3.5 py-2.5">
+      {body ? (
+        <RichText text={body} trailing={live ? <span className="agent-caret" aria-hidden="true" /> : null} />
       ) : (
         <p className="text-[14px] italic text-ink-3">
           {run?.status === "failed" ? "Couldn’t reply." : run?.status === "cancelled" ? "Stopped before replying." : "No reply."}
         </p>
       )}
+      {sources.length > 0 ? <SourceList sources={sources} /> : null}
       {run?.status === "failed" && run.error ? (
         <p className="flex items-start gap-1.5 text-[13px] leading-snug text-danger">
           <IconWarning size={15} className="mt-px shrink-0" />
@@ -97,12 +128,11 @@ export function AgentReplyBody({ message }: { message: Message }) {
 export function AgentReplyFooter({ message }: { message: Message }) {
   const meId = useWorkspace((state) => state.me.id);
   const myRole = useWorkspace((state) => state.myRole);
-  const { run, live, steps } = useAgentReply(message);
+  const { run, live, steps, text } = useAgentReply(message);
   const [showSteps, setShowSteps] = useState(false);
   const [stopping, setStopping] = useState(false);
 
   if (!run) return null;
-  const model = findModel(run.model);
   const canStop = live && (run.requestedBy === meId || myRole !== "member");
 
   async function stop() {
@@ -121,12 +151,8 @@ export function AgentReplyFooter({ message }: { message: Message }) {
   }
 
   const parts: React.ReactNode[] = [];
-  if (model) {
-    parts.push(
-      <span key="model" title={run.route?.reason ?? undefined}>
-        {run.route?.mode === "auto" ? `Auto · ${model.label}` : model.label}
-      </span>,
-    );
+  if (run.model) {
+    parts.push(<ModelBadge key="model" run={run} live={live} sourceCount={live ? 0 : splitSources(text).sources.length} />);
   }
   if (live) parts.push(<span key="live">{run.status === "working" ? "writing" : "working"}</span>);
   if (!live && run.status === "cancelled") parts.push(<span key="stopped">stopped</span>);

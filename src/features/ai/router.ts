@@ -101,10 +101,15 @@ export function wantedStrengths(text: string, specialty: Specialty): ModelStreng
   return [...wanted];
 }
 
-/** At most 9, so it orders models within a provider but never outweighs the provider preference. */
+/**
+ * At most 12, so it orders models within a provider but never outweighs the
+ * provider preference (20 a step). Quick requests favour the model that starts
+ * answering soonest; everything else favours the broadest model, which is the
+ * one that gets more of it right.
+ */
 function fit(model: AiModel, wanted: readonly ModelStrength[], quick: boolean) {
   const matched = wanted.filter((strength) => model.strengths.includes(strength)).length;
-  return Math.min(matched, 2) * 3 + (quick ? model.speed : 0);
+  return Math.min(matched, 2) * 4 + (quick ? model.speed : Math.min(model.strengths.length, 4));
 }
 
 function bestInTier(tier: ModelTier, available: readonly AiModel[], specialty: Specialty, preferWeb: boolean, wanted: readonly ModelStrength[]) {
@@ -113,7 +118,7 @@ function bestInTier(tier: ModelTier, available: readonly AiModel[], specialty: S
     const provider = providers.indexOf(model.provider);
     return (
       (preferWeb && !model.webSearch ? 1000 : 0) +
-      (provider === -1 ? 500 : provider * 10) +
+      (provider === -1 ? 500 : provider * 20) +
       (model.preview ? 5 : 0) -
       fit(model, wanted, tier === "fast")
     );

@@ -28,6 +28,7 @@ const agent = (patch: Partial<Tables<"ai_agents">> = {}): Tables<"ai_agents"> =>
   creativity: "balanced",
   double_check: false,
   visibility: "workspace",
+  usage: "viewers",
   archived_at: null,
   created_at: "",
   updated_at: "",

@@ -8,8 +8,20 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SectionLabel } from "@/components/ui/field";
-import { IconArrowLeft, IconArrowRight, IconCopy, IconLock, IconMore, IconPencil, IconTrash, IconWarning } from "@/components/ui/icons";
+import {
+  IconArrowLeft,
+  IconArrowRight,
+  IconCopy,
+  IconEye,
+  IconLock,
+  IconMore,
+  IconPencil,
+  IconTrash,
+  IconUsers,
+  IconWarning,
+} from "@/components/ui/icons";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
+import { Segmented } from "@/components/ui/segmented";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
 import { useAnimatedNumber } from "@/hooks/use-animated-number";
 import { personColorStyle } from "@/lib/colors";
@@ -17,6 +29,7 @@ import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { AGENT_GLYPHS, PERSON_COLORS, type Agent, type AgentToolId, type CreditAccount, type Specialty } from "@/types/domain";
 
+import { agentAccess, describeSharing } from "../access";
 import { archiveAgent } from "../actions";
 import { creditsForUsage, formatCredits } from "../credits";
 import { useOpenAgentRoom } from "../hooks/use-open-agent-room";
@@ -35,19 +48,65 @@ const TOOL_CHIPS: Record<AgentToolId, string> = {
   github: "github",
 };
 
+type AgentFilter = "all" | "mine" | "shared";
+
+/** One tap from an idea to a drafted agent: the architect fills in the rest. */
+const TEMPLATES: ReadonlyArray<{ name: string; specialty: Specialty; blurb: string; prompt: string }> = [
+  {
+    name: "Researcher",
+    specialty: "research",
+    blurb: "Looks things up and answers with sources",
+    prompt: "Research agent that looks things up on the web and in our chats, compares sources, and answers with links and dates.",
+  },
+  {
+    name: "Meeting notes",
+    specialty: "planning",
+    blurb: "Turns a discussion into decisions and tasks",
+    prompt: "Planning agent that turns a discussion into a short summary, the decisions made, and tasks with owners and due dates.",
+  },
+  {
+    name: "Support desk",
+    specialty: "support",
+    blurb: "Answers customer questions step by step",
+    prompt: "Support agent that answers customer questions step by step from our docs and past chats, and says plainly what it can't answer.",
+  },
+  {
+    name: "Code reviewer",
+    specialty: "engineering",
+    blurb: "Finds bugs and simpler designs in code",
+    prompt: "Engineering agent that reviews code and pull requests for bugs, security issues and simpler designs, and explains each fix.",
+  },
+  {
+    name: "Sales writer",
+    specialty: "writing",
+    blurb: "Drafts emails, follow-ups and proposals",
+    prompt: "Writing agent that drafts sales emails, follow-ups and proposals in our voice from notes about the customer.",
+  },
+  {
+    name: "Data analyst",
+    specialty: "analysis",
+    blurb: "Works through numbers and trade-offs",
+    prompt: "Analysis agent that works through numbers, compares options in small tables, and shows its calculations.",
+  },
+];
+
 export function AgentsScreen() {
   const router = useRouter();
   const workspace = useWorkspace((state) => state.workspace);
+  const meId = useWorkspace((state) => state.me.id);
   const agents = useWorkspace((state) => state.agents);
   const aiReady = useWorkspace((state) => state.aiReady);
   const aiModels = useWorkspace((state) => state.aiModels);
   const credits = useWorkspace((state) => state.credits);
   const [prompt, setPrompt] = useState("");
   const [specialty, setSpecialty] = useState<Specialty | null>(null);
+  const [filter, setFilter] = useState<AgentFilter>("all");
 
   const active = Object.values(agents)
     .filter((agent) => !agent.archivedAt)
     .sort((a, b) => a.name.localeCompare(b.name));
+  const mine = active.filter((agent) => agent.createdBy === meId);
+  const shown = filter === "mine" ? mine : filter === "shared" ? active.filter((agent) => agent.createdBy !== meId) : active;
   const available = AI_MODELS.filter((model) => aiModels.includes(model.id));
   const canBuild = aiReady && available.length > 0;
   const architect = pickArchitectModel(available);
@@ -83,7 +142,7 @@ export function AgentsScreen() {
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-3">{workspace.name}</p>
             <h1 className="mt-2 font-display text-[44px] font-semibold leading-none tracking-[-0.04em]">Agents</h1>
             <p className="mt-3 max-w-[560px] text-[15px] leading-relaxed text-ink-3">
-              Teammates made of instructions. Describe one in plain words, add it to any chat to work alongside everyone, or talk to it
+              Teammates made of instructions. Describe one in plain words, choose who can see and use it, add it to any chat, or talk to it
               one-on-one. No setup, no keys: replies use your AI credits.
             </p>
           </div>
@@ -134,18 +193,61 @@ export function AgentsScreen() {
           </div>
         </section>
 
-        <SectionLabel className="mt-12">
-          {active.length === 0 ? "Your agents" : `${active.length} ${active.length === 1 ? "agent" : "agents"}`}
-        </SectionLabel>
+        <SectionLabel className="mt-10">Start from a template</SectionLabel>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {TEMPLATES.map((template, index) => {
+            const profile = SPECIALTY_PROFILES[template.specialty];
+            return (
+              <button
+                key={template.name}
+                type="button"
+                disabled={!canBuild}
+                onClick={() => router.push(routes.newAgent(workspace.slug, template.prompt))}
+                style={{ ...personColorStyle(profile.color), animationDelay: `${index * 30}ms` }}
+                className="group flex animate-rise items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 text-left transition-[border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-line-2 disabled:pointer-events-none disabled:opacity-55"
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-[11px] bg-person text-person-on">
+                  <AgentGlyphMark glyph={profile.glyph} className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] font-semibold text-ink">{template.name}</span>
+                  <span className="block truncate text-[12.5px] text-ink-3">{template.blurb}</span>
+                </span>
+                <IconArrowRight size={15} className="shrink-0 text-ink-4 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-ink-2" />
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-12 flex flex-wrap items-center justify-between gap-3">
+          <SectionLabel>{active.length === 0 ? "Your agents" : `${active.length} ${active.length === 1 ? "agent" : "agents"}`}</SectionLabel>
+          {active.length > 0 ? (
+            <Segmented<AgentFilter>
+              size="sm"
+              label="Which agents"
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "all", label: "All" },
+                { value: "mine", label: mine.length > 0 ? `Made by me ${mine.length}` : "Made by me" },
+                { value: "shared", label: "Shared with me" },
+              ]}
+            />
+          ) : null}
+        </div>
 
         {active.length === 0 ? (
           <div className="mt-4 rounded-[24px] border border-dashed border-line-2 px-6 py-14 text-center">
             <p className="font-display text-xl font-semibold">No agents yet.</p>
-            <p className="mt-1 text-sm text-ink-3">Describe the first one above, or type /agent in any chat.</p>
+            <p className="mt-1 text-sm text-ink-3">Describe the first one above, pick a template, or type /agent in any chat.</p>
+          </div>
+        ) : shown.length === 0 ? (
+          <div className="mt-4 rounded-[24px] border border-dashed border-line-2 px-6 py-10 text-center">
+            <p className="text-[14px] text-ink-3">{filter === "mine" ? "You haven’t made an agent yet." : "Nobody has shared an agent with you yet."}</p>
           </div>
         ) : (
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {active.map((agent, index) => (
+            {shown.map((agent, index) => (
               <AgentCard key={agent.id} agent={agent} index={index} available={aiModels.includes(agent.model)} />
             ))}
           </div>
@@ -212,6 +314,34 @@ function CreditsCard({ credits, slug }: { credits: CreditAccount; slug: string }
   );
 }
 
+function AccessChip({ agent, access }: { agent: Agent; access: ReturnType<typeof agentAccess> }) {
+  if (agent.visibility === "private") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2">
+        <IconLock size={11} />
+        Private
+      </span>
+    );
+  }
+  if (access === "view") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2" title="You can see this agent and its replies, but not use it.">
+        <IconEye size={11} />
+        View only
+      </span>
+    );
+  }
+  if (agent.visibility === "people") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-2" title={describeSharing(agent)}>
+        <IconUsers size={11} />
+        Shared
+      </span>
+    );
+  }
+  return null;
+}
+
 function AgentCard({ agent, index, available }: { agent: Agent; index: number; available: boolean }) {
   const store = useWorkspaceStore();
   const router = useRouter();
@@ -222,7 +352,9 @@ function AgentCard({ agent, index, available }: { agent: Agent; index: number; a
   const [confirmArchive, setConfirmArchive] = useState(false);
 
   const profile = SPECIALTY_PROFILES[agent.specialty];
-  const canEdit = agent.createdBy === meId || myRole !== "member";
+  const access = agentAccess(agent, meId, myRole);
+  const canEdit = access === "edit";
+  const canUse = access !== "view";
   const modelProblem = agent.modelMode === "fixed" && !available;
 
   async function copyHandle() {
@@ -240,7 +372,7 @@ function AgentCard({ agent, index, available }: { agent: Agent; index: number; a
       toast.error(result.error);
       throw new Error(result.error);
     }
-    store.getState().upsertAgent(result.data);
+    store.getState().upsertAgent({ ...result.data, members: agent.members });
     toast.success(`${agent.name} was archived.`);
   }
 
@@ -266,11 +398,13 @@ function AgentCard({ agent, index, available }: { agent: Agent; index: number; a
               </Button>
             </MenuTrigger>
             <MenuContent align="end">
-              <MenuItem icon={<IconCopy size={16} />} onSelect={() => void copyHandle()}>
-                Copy @{agent.handle}
-              </MenuItem>
+              {canUse ? (
+                <MenuItem icon={<IconCopy size={16} />} onSelect={() => void copyHandle()}>
+                  Copy @{agent.handle}
+                </MenuItem>
+              ) : null}
               <MenuItem icon={<IconPencil size={16} />} onSelect={() => router.push(routes.agent(slug, agent.id))}>
-                {canEdit ? "Edit" : "View setup"}
+                {canEdit ? "Edit and share" : "View setup"}
               </MenuItem>
               {canEdit ? (
                 <>
@@ -284,11 +418,11 @@ function AgentCard({ agent, index, available }: { agent: Agent; index: number; a
           </Menu>
         </div>
 
-        <h2 className="mt-3 flex items-center gap-1.5 text-[16px] font-semibold text-ink">
-          {agent.name}
-          {agent.visibility === "private" ? <IconLock size={13} className="text-ink-3" aria-label="Only its maker can use it" /> : null}
-        </h2>
-        <p className="font-mono text-[12px] text-ink-3">@{agent.handle}</p>
+        <h2 className="mt-3 flex items-center gap-1.5 text-[16px] font-semibold text-ink">{agent.name}</h2>
+        <p className="font-mono text-[12px] text-ink-3">
+          @{agent.handle}
+          {agent.createdBy === meId ? " · yours" : ""}
+        </p>
         <p className="mt-2 line-clamp-2 min-h-[40px] text-[13.5px] leading-snug text-ink-2">{agent.tagline || profile.summary}</p>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -296,6 +430,7 @@ function AgentCard({ agent, index, available }: { agent: Agent; index: number; a
             <AgentGlyphMark glyph={profile.glyph} className="size-3" />
             {profile.label}
           </span>
+          <AccessChip agent={agent} access={access} />
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10.5px]",
@@ -314,9 +449,15 @@ function AgentCard({ agent, index, available }: { agent: Agent; index: number; a
         </div>
 
         <div className="mt-auto pt-4">
-          <Button size="sm" variant="secondary" className="w-full" onClick={() => void openRoom(agent.id)}>
-            Chat with {agent.name}
-          </Button>
+          {canUse ? (
+            <Button size="sm" variant="secondary" className="w-full" onClick={() => void openRoom(agent.id)}>
+              Chat with {agent.name}
+            </Button>
+          ) : (
+            <p className="rounded-full border border-dashed border-line-2 px-3 py-1.5 text-center text-[12.5px] text-ink-3">
+              Ask its maker if you need to use it
+            </p>
+          )}
         </div>
       </div>
 

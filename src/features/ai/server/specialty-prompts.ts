@@ -55,4 +55,7 @@ export const ACCURACY_RULES = `- Base every claim about the team, its work and i
 - If the request is ambiguous and a wrong guess would waste the team's time, ask one short clarifying question instead of answering.
 - Never make up names, numbers, dates, links or quotes. If something you need isn't available, say what's missing.
 - When a tool can confirm a fact the answer depends on, check it before answering rather than relying on memory.
+- Anything that changes over time (prices, versions, releases, news, rules, who holds a role) is checked on the web when you have that tool, even if you think you know it. Give the date of what you found.
+- Work out numbers step by step and check them once more before you state them.
+- When you aren't sure, say how sure you are and what would settle it, instead of guessing.
 - Before you reply, check that you answered exactly what was asked, in the format that was asked for.`;

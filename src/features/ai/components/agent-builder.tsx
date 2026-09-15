@@ -26,7 +26,9 @@ import {
   type Agent,
   type AgentExample,
   type AgentGlyph,
+  type AgentMember,
   type AgentToolId,
+  type AgentUsage,
   type AgentVisibility,
   type Creativity,
   type ModelMode,
@@ -35,6 +37,7 @@ import {
   type Specialty,
 } from "@/types/domain";
 
+import { canEditAgent, canShareAgent } from "../access";
 import { archiveAgent, createAgent, updateAgent } from "../actions";
 import {
   AGENT_TOOLS,
@@ -54,6 +57,7 @@ import { AI_MODELS, findModel, pickArchitectModel, recommendModel, STRENGTH_LABE
 import { modelForTier } from "../router";
 import { RESPONSE_STYLE_OPTIONS, SPECIALTY_LIST, SPECIALTY_PROFILES } from "../specialties";
 import { AgentAvatar, AgentGlyphMark, AgentTag, GLYPH_LABELS } from "./agent-avatar";
+import { AgentSharing } from "./agent-sharing";
 import { GlyphShuffle } from "./glyph-shuffle";
 import { SpecialtyChips } from "./specialty-chips";
 
@@ -78,6 +82,8 @@ interface FormState {
   color: PersonColor;
   glyph: AgentGlyph;
   visibility: AgentVisibility;
+  usage: AgentUsage;
+  members: AgentMember[];
 }
 
 const CREATIVITY_OPTIONS: Record<Creativity, { label: string; summary: string }> = {
@@ -108,6 +114,8 @@ function blankForm(model: string): FormState {
     color: profile.color,
     glyph: profile.glyph,
     visibility: "workspace",
+    usage: "viewers",
+    members: [],
   };
 }
 
@@ -131,6 +139,8 @@ const formFromAgent = (agent: Agent): FormState => ({
   color: agent.color,
   glyph: agent.glyph,
   visibility: agent.visibility,
+  usage: agent.usage,
+  members: agent.members,
 });
 
 const toDraft = (form: FormState): AgentDraft => ({
@@ -169,6 +179,8 @@ const toInput = (form: FormState, workspaceId: string): AgentInput => ({
   color: form.color,
   glyph: form.glyph,
   visibility: form.visibility,
+  usage: form.visibility === "private" ? "owner" : form.usage,
+  members: form.visibility === "private" ? [] : form.members,
 });
 
 export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; initialPrompt?: string }) {
@@ -208,7 +220,9 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
   const save = useServerAction(saveAction);
 
   const patch = (next: Partial<FormState>) => setForm((current) => ({ ...current, ...next }));
-  const canEdit = !existing || (!existing.archivedAt && (existing.createdBy === meId || myRole !== "member"));
+  const canEdit = !existing || (!existing.archivedAt && canEditAgent(existing, meId, myRole));
+  // Editors change how it works; who has it stays with its maker and the admins.
+  const canShare = !existing || (!existing.archivedAt && canShareAgent(existing, meId, myRole));
   const hasBlueprint = Boolean(existing) || draftedBy !== null;
   const canDraft = aiReady && available.length > 0 && !drafting;
 
@@ -363,7 +377,7 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
         {!canEdit ? (
           <p className="mt-6 flex items-center gap-2 rounded-2xl border border-line bg-surface px-4 py-3 text-[13.5px] text-ink-2">
             <IconLock size={15} className="shrink-0" />
-            {existing?.archivedAt ? "This agent is archived." : "Only the person who made this agent, or an admin, can change it."}
+            {existing?.archivedAt ? "This agent is archived." : "You can see how this agent works. Its maker, an admin, or someone they made an editor can change it."}
           </p>
         ) : null}
 
@@ -758,15 +772,16 @@ export function AgentBuilder({ agentId, initialPrompt }: { agentId?: string; ini
               </div>
             </BuilderSection>
 
-            <BuilderSection index={9} title="Who can use it" description="Shared agents can also be added to any chat, where they work alongside everyone.">
-              <Segmented<AgentVisibility>
-                label="Who can use it"
-                value={form.visibility}
-                onChange={(visibility) => patch({ visibility })}
-                options={[
-                  { value: "workspace", label: "Everyone in the workspace" },
-                  { value: "private", label: "Only me" },
-                ]}
+            <BuilderSection
+              index={9}
+              title="Sharing"
+              description="Choose who sees it, who can talk to it and give it work, and who can change it. You can always use what you make."
+            >
+              <AgentSharing
+                value={{ visibility: form.visibility, usage: form.usage, members: form.members }}
+                onChange={(next) => patch(next)}
+                makerId={existing ? existing.createdBy : meId}
+                editable={canShare}
               />
             </BuilderSection>
           </fieldset>

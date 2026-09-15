@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 
 import { IconButton } from "@/components/ui/icon-button";
 import { IconArrowUp, IconClose, IconPaperclip, IconReply, IconSpark, IconTasks } from "@/components/ui/icons";
+import { canUseAgent } from "@/features/ai/access";
 import { warmAgentReplies } from "@/features/ai/api";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { AgentPanel } from "@/features/ai/components/agent-panel";
@@ -46,6 +47,7 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   const conversationId = conversation.id;
   const store = useWorkspaceStore();
   const me = useWorkspace((state) => state.me);
+  const myRole = useWorkspace((state) => state.myRole);
   const members = useWorkspace((state) => state.members);
   const agents = useWorkspace((state) => state.agents);
   const aiReady = useWorkspace((state) => state.aiReady);
@@ -88,12 +90,16 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
     [taskText, members, agents],
   );
 
-  // "@que" at the caret opens a picker of agents; Escape dismisses it for that mention only.
+  // "@que" at the caret opens a picker of agents this person may use; Escape dismisses it for that mention only.
+  const usable = (agent: Agent) => canUseAgent(agent, me.id, myRole);
   const mention = aiReady && !panelOpen ? activeMentionQuery(text, caret) : null;
-  const suggestions = mention && mention.start !== dismissedMentionAt ? matchAgents(agents, mention.query) : [];
+  const suggestions = mention && mention.start !== dismissedMentionAt ? matchAgents(agents, mention.query, 6, usable) : [];
   const mentionOpen = suggestions.length > 0;
   const activeMention = Math.min(mentionIndex, Math.max(suggestions.length - 1, 0));
-  const woken = aiReady && text.trim() && !command && !taskCommand ? agentsToWake(text, conversation, agents, replyTo) : [];
+  const calling = aiReady && text.trim() && !command && !taskCommand;
+  const woken = calling ? agentsToWake(text, conversation, agents, replyTo, usable) : [];
+  // Mentioned, but shared with this person to see only: say so before they send.
+  const viewOnly = calling ? agentsToWake(text, conversation, agents, replyTo).filter((agent) => !usable(agent)) : [];
   const lead = woken[0];
   const autoPick = lead
     ? routeModel({
@@ -124,6 +130,18 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
   useEffect(() => {
     if (window.matchMedia("(hover: hover)").matches) textareaRef.current?.focus();
   }, [conversationId, replyToId]);
+
+  // Text handed over from elsewhere on screen, like "Share my update" in My work, joins whatever is already typed.
+  const handedOver = useWorkspace((state) => (state.composerInsert?.conversationId === conversationId ? state.composerInsert : null));
+  const takeHandedOver = useEffectEvent((insert: { text: string; id: number }) => {
+    store.getState().takeComposerInsert(insert.id);
+    const next = text.trim() ? `${text.trimEnd()}\n\n${insert.text}` : insert.text;
+    updateText(next, next.length);
+    focusAt(next.length);
+  });
+  useEffect(() => {
+    if (handedOver) takeHandedOver(handedOver);
+  }, [handedOver]);
 
   function focusAt(position: number) {
     requestAnimationFrame(() => {
@@ -434,6 +452,11 @@ export function Composer({ conversation, uploads, onTyping, onStopTyping }: Comp
             <span className={cn("min-w-0 truncate", quickTask.unknownMention ? "text-danger" : "text-ink-3")}>{taskHint(quickTask)}</span>
           ) : command ? (
             <span className="text-ink-3">enter to design an agent{command[1]?.trim() ? " from your description" : ""}</span>
+          ) : woken.length === 0 && viewOnly.length > 0 ? (
+            <span className="min-w-0 truncate text-danger">
+              {joinNames(viewOnly.map((agent) => agent.name), 2)} {viewOnly.length === 1 ? "is" : "are"} view only for you · ask the maker for
+              access
+            </span>
           ) : woken.length > 0 ? (
             <span className="flex min-w-0 items-center gap-1.5 text-ink-3">
               <AgentAvatar agent={woken[0]} size="xs" className="size-4 rounded-[5px]" />

@@ -10,17 +10,19 @@ export const MAX_AGENTS_PER_MESSAGE = 3;
  *   2. the agent whose message is being replied to, so a thread with an agent
  *      carries on without mentioning it again
  *   3. every active agent @mentioned, in the order they appear
- * The server applies the same rules again with its own data.
+ * Agents the person isn't allowed to use are left out. The server applies the
+ * same rules again with its own data.
  */
 export function agentsToWake(
   body: string,
   conversation: Pick<Conversation, "agentId"> | undefined,
   agents: Record<string, Agent>,
   replyTo?: { agentId: string | null } | null,
+  canUse: (agent: Agent) => boolean = () => true,
 ): Agent[] {
   const woken: Agent[] = [];
   const add = (agent: Agent | undefined) => {
-    if (agent && !agent.archivedAt && !woken.includes(agent)) woken.push(agent);
+    if (agent && !agent.archivedAt && canUse(agent) && !woken.includes(agent)) woken.push(agent);
   };
 
   if (conversation?.agentId) add(agents[conversation.agentId]);

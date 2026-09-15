@@ -135,7 +135,9 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
     return () => observer.disconnect();
   }, [ready]);
 
-  // Reading at the bottom of a visible chat counts as read.
+  // Reading at the bottom of a visible chat counts as read. A sync or refresh can bring back an unread
+  // count for the chat that's open; seeing one while at the bottom marks it read again straight away.
+  const unreadCount = conversation.unreadCount;
   useEffect(() => {
     if (!latestConfirmed || !atBottom) return;
     const attempt = () => {
@@ -148,7 +150,7 @@ export function MessageList({ conversation, focusMessageId }: MessageListProps) 
       document.removeEventListener("visibilitychange", attempt);
       window.removeEventListener("focus", attempt);
     };
-  }, [latestConfirmed, atBottom, markRead]);
+  }, [latestConfirmed, atBottom, markRead, unreadCount]);
 
   function handleScroll() {
     const element = scrollRef.current;

@@ -353,11 +353,19 @@ export function mapAgent(row: Tables<"ai_agents">): Agent {
     starters: row.starters ?? [],
     color: toPersonColor(row.color),
     glyph: oneOf(row.glyph, AGENT_GLYPHS, "orbit"),
-    visibility: row.visibility === "private" ? "private" : "workspace",
+    visibility: row.visibility === "private" || row.visibility === "people" ? row.visibility : "workspace",
+    // Rows from before sharing let everyone who sees an agent use it.
+    usage: row.usage === "owner" || row.usage === "people" ? row.usage : "viewers",
+    members: [],
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** Who an agent is shared with, from its ai_agent_members rows. */
+export function mapAgentMembers(rows: ReadonlyArray<{ user_id: string; role: string }>): Agent["members"] {
+  return rows.map((row) => ({ userId: row.user_id, role: row.role === "viewer" || row.role === "editor" ? row.role : "user" }));
 }
 
 /** A tasks row or the JSON a task function returns. */

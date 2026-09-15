@@ -7,6 +7,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { IconCalendar, IconCheck, IconSearch } from "@/components/ui/icons";
 import { inputStyles } from "@/components/ui/input";
 import { Menu, MenuContent, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "@/components/ui/menu";
+import { canUseAgent } from "@/features/ai/access";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { useWorkspace } from "@/features/workspace/store/workspace-provider";
 import { useHydrated } from "@/hooks/use-hydrated";
@@ -131,6 +132,7 @@ function AssigneeList({ assigneeId, agentId, onPick }: AssigneeChoice & { onPick
   const members = useWorkspace((state) => state.members);
   const agents = useWorkspace((state) => state.agents);
   const meId = useWorkspace((state) => state.me.id);
+  const myRole = useWorkspace((state) => state.myRole);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listId = useId();
@@ -153,7 +155,8 @@ function AssigneeList({ assigneeId, agentId, onPick }: AssigneeChoice & { onPick
       }));
 
     const workers = Object.values(agents)
-      .filter((agent) => !agent.archivedAt && matches(`${agent.name} ${agent.handle}`))
+      // Only agents this person may give work to, plus the one already on the task.
+      .filter((agent) => !agent.archivedAt && (agent.id === agentId || canUseAgent(agent, meId, myRole)) && matches(`${agent.name} ${agent.handle}`))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((agent) => ({
         key: agent.id,
@@ -179,7 +182,7 @@ function AssigneeList({ assigneeId, agentId, onPick }: AssigneeChoice & { onPick
       : [];
 
     return [...nobody, ...people, ...workers];
-  }, [members, agents, meId, query, assigneeId, agentId]);
+  }, [members, agents, meId, myRole, query, assigneeId, agentId]);
 
   const current = Math.min(active, Math.max(options.length - 1, 0));
 

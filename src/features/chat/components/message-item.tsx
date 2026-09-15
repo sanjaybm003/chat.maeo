@@ -10,6 +10,7 @@ import { IconCopy, IconMore, IconPencil, IconReply, IconSmile, IconSpark, IconTa
 import { LocalTime } from "@/components/ui/local-time";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Tooltip } from "@/components/ui/tooltip";
+import { canEditAgent } from "@/features/ai/access";
 import { AgentAvatar, AgentTag } from "@/features/ai/components/agent-avatar";
 import { AgentReplyBody, AgentReplyFooter } from "@/features/ai/components/agent-reply";
 import { useSaveAsExample } from "@/features/ai/hooks/use-save-example";
@@ -65,7 +66,7 @@ export const MessageItem = memo(function MessageItem({
   const tasksReady = useWorkspace((state) => state.tasksReady);
   const openDialog = useWorkspace((state) => state.openDialog);
   const canTuneAgent = useWorkspace(
-    (state) => Boolean(agent && !agent.archivedAt && (agent.createdBy === state.me.id || state.myRole !== "member")),
+    (state) => Boolean(agent && !agent.archivedAt && canEditAgent(agent, state.me.id, state.myRole)),
   );
   const saveAsExample = useSaveAsExample();
   const [toolsOpen, setToolsOpen] = useState(false);

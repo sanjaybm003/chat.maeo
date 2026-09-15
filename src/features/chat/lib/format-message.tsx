@@ -2,11 +2,13 @@ import type { ReactNode } from "react";
 
 /**
  * A deliberately small formatter: ```code blocks```, `inline code`, **bold**,
- * _italic_ and links. Builds React nodes, never HTML strings, so message text
- * can't inject markup.
+ * _italic_, [labelled](https://…) links and bare links. Builds React nodes,
+ * never HTML strings, so message text can't inject markup.
  */
 const TOKEN =
-  /(```[\s\S]*?```)|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|((?<![\w])_[^_\n]+_(?![\w]))|((?:https?:\/\/|www\.)[^\s<]+[^\s<.,:;"')\]!?])/g;
+  /(```[\s\S]*?```)|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|((?<![\w])_[^_\n]+_(?![\w]))|\[((?:\\.|[^\]\\\n]){1,300})\]\((https?:\/\/[^\s)]+)\)|((?:https?:\/\/|www\.)[^\s<]+[^\s<.,:;"')\]!?])/g;
+
+const LINK_CLASS = "underline decoration-[color-mix(in_srgb,currentColor_35%,transparent)] underline-offset-2 hover:decoration-current";
 
 export function formatMessageBody(body: string): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -16,7 +18,17 @@ export function formatMessageBody(body: string): ReactNode[] {
   for (const match of body.matchAll(TOKEN)) {
     const index = match.index ?? 0;
     if (index > cursor) nodes.push(body.slice(cursor, index));
-    const [token, block, inline, bold, italic, url] = match;
+    const [token, block, inline, bold, italic, label, labelledUrl, url] = match;
+
+    if (label && labelledUrl) {
+      nodes.push(
+        <a key={key++} href={labelledUrl} target="_blank" rel="noopener noreferrer nofollow" className={LINK_CLASS}>
+          {label.replace(/\\(.)/g, "$1")}
+        </a>,
+      );
+      cursor = index + token.length;
+      continue;
+    }
 
     if (block) {
       nodes.push(

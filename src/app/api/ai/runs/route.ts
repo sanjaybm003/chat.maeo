@@ -166,11 +166,14 @@ export async function POST(request: Request) {
   const runs: Array<{ runId: string; messageId: string; agentId: string; model: string; created: boolean }> = [];
   const work: Array<Parameters<typeof runAgentReply>[0]> = [];
   let refusal: string | undefined;
+  /** Agents this person can see but isn't allowed to use. */
+  const forbidden: string[] = [];
 
   for (const { agent, decision, started, error } of attempts) {
     if (error || !started) {
       log.warn("agent run refused", { agentId: agent.id, error });
       if (error?.code === "P0402" || error?.code === "P0429") refusal ??= error.code;
+      if (error?.code === "42501") forbidden.push(agent.handle);
       continue;
     }
 
@@ -200,6 +203,9 @@ export async function POST(request: Request) {
     }
   }
 
+  if (runs.length === 0 && forbidden.length > 0 && !refusal) {
+    return reply(403, { error: `You can’t use @${forbidden[0]}. Ask the person who made it for access.`, code: "agent_forbidden" });
+  }
   if (runs.length === 0) return startError(refusal);
 
   if (work.length > 0) {

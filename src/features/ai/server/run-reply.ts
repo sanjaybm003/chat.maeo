@@ -8,7 +8,8 @@ import type { AgentRunStep, Specialty } from "@/types/domain";
 
 import { creditsForUsage, estimateReservation, estimateTokens, type TokenUsage } from "../credits";
 import { describeNow } from "../lib/time";
-import { sourcesFooter, unverifiedLinks } from "../lib/web-evidence";
+import { arrangeSources, collectSources } from "../lib/reply-sources";
+import { unverifiedLinks } from "../lib/web-evidence";
 import type { AiModel } from "../models";
 import { fallbackModel } from "../router";
 import { SPECIALTY_PROFILES, toSpecialty } from "../specialties";
@@ -102,7 +103,8 @@ export function webDepthFor(specialty: Specialty, complexity: number): WebDepth 
 /**
  * Whether a finished reply gets a second read: always when the agent is set to
  * double-check, and otherwise when it cites links that nothing it read
- * contains, or answers a demanding question from the web.
+ * contains, or answers anything beyond a quick question from the web, where a
+ * misread page is the likeliest way to be wrong.
  */
 export function shouldVerify({
   doubleCheck,
@@ -115,7 +117,7 @@ export function shouldVerify({
   usedWeb: boolean;
   complexity: number;
 }) {
-  return doubleCheck || suspiciousLinks > 0 || (usedWeb && complexity >= 0.68);
+  return doubleCheck || suspiciousLinks > 0 || (usedWeb && complexity >= 0.4);
 }
 
 /** Same arguments in any key order give the same key. */
@@ -472,10 +474,10 @@ export async function runAgentReply(input: ReplyRunInput): Promise<void> {
       if (suspicious.length > 0) log.info("reply cites links nothing it read contains", { links: suspicious });
       const verify = shouldVerify({ doubleCheck: input.agent.double_check, suspiciousLinks: suspicious.length, usedWeb, complexity: input.complexity });
       if (verify && Date.now() - startedAt < RUN_DEADLINE_MS - REVIEW_TIME_MS) text = await doubleCheck(text, suspicious);
-      // An answer built on the web says where it came from, even when the model linked nothing.
-      const footer = usedWeb ? sourcesFooter(text, webSources) : "";
-      if (footer) {
-        text += footer;
+      // Links the agent read become numbered sources under the reply; links nothing backs up lose their address.
+      const arranged = arrangeSources(text, { known: collectSources(material, webSources), fallback: usedWeb ? webSources : [] }).text;
+      if (arranged !== text) {
+        text = arranged;
         publisher.setText(text);
       }
     }

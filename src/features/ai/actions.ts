@@ -2,9 +2,9 @@
 
 import { fail, ok, toFieldErrors, type ActionResult } from "@/lib/action-result";
 import { getErrorMessage } from "@/lib/errors";
-import { mapAgent } from "@/lib/mappers";
+import { mapAgent, mapAgentMembers } from "@/lib/mappers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Json } from "@/types/database";
+import type { Json, Tables } from "@/types/database";
 import type { Agent, AgentExample } from "@/types/domain";
 
 import { agentExampleSchema, agentInputSchema, MAX_EXAMPLES, type AgentInput } from "./agent-spec";
@@ -12,6 +12,7 @@ import { findModel } from "./models";
 import { configuredModels } from "./server/env";
 
 type ParsedAgent = ReturnType<typeof agentInputSchema.parse>;
+type ServerSupabase = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 function validate(input: AgentInput): { ok: true; data: ParsedAgent } | { ok: false; result: ActionResult<never> } {
   const parsed = agentInputSchema.safeParse(input);
@@ -59,6 +60,7 @@ function editableFields(data: ParsedAgent) {
     color: data.color,
     glyph: data.glyph,
     visibility: data.visibility,
+    usage: data.usage,
   };
 }
 
@@ -66,9 +68,11 @@ type AgentFields = ReturnType<typeof editableFields>;
 
 /** A database without the tasks-and-tuning update has no tuning columns and knows only the original tools. */
 const isMissingColumn = (error: { code?: string } | null) => error?.code === "PGRST204" || error?.code === "42703";
+/** A database without the sharing update refuses "people" as a visibility. */
+const isRefusedValue = (error: { code?: string } | null) => error?.code === "23514";
 
-function withoutTuning(fields: AgentFields) {
-  const legacy: Partial<AgentFields> = { ...fields, tools: fields.tools.filter((tool) => tool !== "tasks" && tool !== "github") };
+function withoutTuning(fields: Partial<AgentFields>) {
+  const legacy: Partial<AgentFields> = { ...fields, tools: (fields.tools ?? []).filter((tool) => tool !== "tasks" && tool !== "github") };
   delete legacy.rules;
   delete legacy.examples;
   delete legacy.creativity;
@@ -76,10 +80,53 @@ function withoutTuning(fields: AgentFields) {
   return legacy;
 }
 
+/** Before sharing existed there were only two choices; sharing with some people falls back to private. */
+function withoutSharing(fields: Partial<AgentFields>) {
+  const legacy: Partial<AgentFields> = { ...fields, visibility: fields.visibility === "workspace" ? "workspace" : "private" };
+  delete legacy.usage;
+  return legacy;
+}
+
 function saveError(error: { code?: string; message: string }, handle: string): ActionResult<never> {
   if (error.code === "23505") return fail("That handle is taken.", { handle: `Another agent already answers to @${handle}.` });
-  if (error.code === "42501") return fail("You can't change agents in this workspace.");
+  if (error.code === "42501") return fail(error.message.startsWith("Only") ? error.message : "You can't change this agent.");
   return fail(getErrorMessage(error, "Couldn't save the agent. Try again."));
+}
+
+type AgentRowResult = { data: Tables<"ai_agents"> | null; error: { code?: string; message: string } | null };
+
+/** Tries the full row, then without newer columns, for databases that haven't had every update yet. */
+async function saveRow(write: (fields: Partial<AgentFields>) => PromiseLike<AgentRowResult>, fields: AgentFields) {
+  let result = await write(fields);
+  if (isMissingColumn(result.error) || isRefusedValue(result.error)) result = await write(withoutSharing(fields));
+  if (isMissingColumn(result.error)) result = await write(withoutTuning(withoutSharing(fields)));
+  return result;
+}
+
+/** Sets who the agent is shared with, when the person saving may, and returns the agent with its members. */
+async function withMembers(supabase: ServerSupabase, row: Tables<"ai_agents">, data: ParsedAgent, userId: string): Promise<ActionResult<Agent>> {
+  const agent = mapAgent(row);
+  const { data: membership } = await supabase
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", row.workspace_id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const canShare = row.created_by === userId || (membership?.role !== undefined && membership.role !== "member");
+
+  if (canShare) {
+    const members = row.visibility === "private" ? [] : data.members.filter((member) => member.userId !== row.created_by);
+    const { data: saved, error } = await supabase.rpc("set_agent_members", {
+      p_agent_id: row.id,
+      p_members: members.map((member) => ({ user_id: member.userId, role: member.role })) as unknown as Json,
+    });
+    // PGRST202: the database doesn't have sharing yet; the agent itself still saved.
+    if (error && error.code !== "PGRST202") return fail(getErrorMessage(error, "The agent saved, but sharing it didn't. Try again."));
+    return ok({ ...agent, members: saved ? mapAgentMembers(saved) : [] });
+  }
+
+  const { data: current } = await supabase.from("ai_agent_members").select("user_id, role").eq("agent_id", row.id);
+  return ok({ ...agent, members: mapAgentMembers(current ?? []) });
 }
 
 export async function createAgent(input: AgentInput): Promise<ActionResult<Agent>> {
@@ -89,17 +136,19 @@ export async function createAgent(input: AgentInput): Promise<ActionResult<Agent
   const supabase = await createSupabaseServerClient();
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return fail("Your session ended. Sign in again.");
+  const userId = auth.user.id;
 
-  const insert = (fields: Partial<AgentFields>) =>
-    supabase
-      .from("ai_agents")
-      .insert({ workspace_id: checked.data.workspaceId, created_by: auth.user!.id, ...(fields as AgentFields) })
-      .select("*")
-      .single();
-  let result = await insert(editableFields(checked.data));
-  if (isMissingColumn(result.error)) result = await insert(withoutTuning(editableFields(checked.data)));
-  if (result.error) return saveError(result.error, checked.data.handle);
-  return ok(mapAgent(result.data));
+  const result = await saveRow(
+    (fields) =>
+      supabase
+        .from("ai_agents")
+        .insert({ workspace_id: checked.data.workspaceId, created_by: userId, ...(fields as AgentFields) })
+        .select("*")
+        .single(),
+    editableFields(checked.data),
+  );
+  if (result.error || !result.data) return saveError(result.error ?? { message: "Couldn't save the agent." }, checked.data.handle);
+  return withMembers(supabase, result.data, checked.data, userId);
 }
 
 export async function updateAgent(agentId: string, input: AgentInput): Promise<ActionResult<Agent>> {
@@ -107,20 +156,24 @@ export async function updateAgent(agentId: string, input: AgentInput): Promise<A
   if (!checked.ok) return checked.result;
 
   const supabase = await createSupabaseServerClient();
-  const update = (fields: Partial<AgentFields>) =>
-    supabase
-      .from("ai_agents")
-      .update(fields)
-      .eq("id", agentId)
-      .eq("workspace_id", checked.data.workspaceId)
-      .is("archived_at", null)
-      .select("*")
-      .maybeSingle();
-  let result = await update(editableFields(checked.data));
-  if (isMissingColumn(result.error)) result = await update(withoutTuning(editableFields(checked.data)));
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return fail("Your session ended. Sign in again.");
+
+  const result = await saveRow(
+    (fields) =>
+      supabase
+        .from("ai_agents")
+        .update(fields)
+        .eq("id", agentId)
+        .eq("workspace_id", checked.data.workspaceId)
+        .is("archived_at", null)
+        .select("*")
+        .maybeSingle(),
+    editableFields(checked.data),
+  );
   if (result.error) return saveError(result.error, checked.data.handle);
-  if (!result.data) return fail("Only the person who made this agent, or an admin, can edit it.");
-  return ok(mapAgent(result.data));
+  if (!result.data) return fail("Only the person who made this agent, its editors or an admin can change it.");
+  return withMembers(supabase, result.data, checked.data, auth.user.id);
 }
 
 export async function archiveAgent(agentId: string): Promise<ActionResult<Agent>> {
@@ -133,7 +186,7 @@ export async function archiveAgent(agentId: string): Promise<ActionResult<Agent>
     .select("*")
     .maybeSingle();
   if (error) return fail(getErrorMessage(error, "Couldn't archive the agent."));
-  if (!data) return fail("Only the person who made this agent, or an admin, can archive it.");
+  if (!data) return fail("Only the person who made this agent, its editors or an admin can archive it.");
   return ok(mapAgent(data));
 }
 
@@ -158,6 +211,7 @@ export async function addAgentExample(agentId: string, example: AgentExample): P
     .select("*")
     .maybeSingle();
   if (error) return fail(getErrorMessage(error, "Couldn't save the example."));
-  if (!data) return fail("Only the person who made this agent, or an admin, can tune it.");
-  return ok(mapAgent(data));
+  if (!data) return fail("Only the person who made this agent, its editors or an admin can tune it.");
+  const { data: members } = await supabase.from("ai_agent_members").select("user_id, role").eq("agent_id", agentId);
+  return ok({ ...mapAgent(data), members: mapAgentMembers(members ?? []) });
 }

@@ -20,6 +20,7 @@ export interface SpecialtyProfile {
   summary: string;
   glyph: AgentGlyph;
   color: PersonColor;
+  /** Every kind starts with the web: current facts beat remembered ones. */
   tools: AgentToolId[];
   style: ResponseStyle;
   /** Where automatic model routing starts before reading the request: 0 is simple, 1 is demanding. */
@@ -39,7 +40,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     summary: "Everyday questions, quick answers and small tasks.",
     glyph: "spark",
     color: "cobalt",
-    tools: ["history", "directory"],
+    tools: ["history", "directory", "web"],
     style: "balanced",
     baseline: 0.3,
     temperature: 0.6,
@@ -65,7 +66,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     summary: "Drafts, rewrites and polishes messages, docs and posts.",
     glyph: "wave",
     color: "bubblegum",
-    tools: ["history"],
+    tools: ["history", "web"],
     style: "balanced",
     baseline: 0.45,
     temperature: 0.8,
@@ -78,7 +79,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     summary: "Works through numbers, options and trade-offs.",
     glyph: "prism",
     color: "iris",
-    tools: ["history", "search"],
+    tools: ["history", "search", "web"],
     style: "detailed",
     baseline: 0.62,
     temperature: 0.2,
@@ -91,7 +92,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     summary: "Turns discussion into plans, owners and next steps.",
     glyph: "grid",
     color: "saffron",
-    tools: ["history", "search", "directory"],
+    tools: ["history", "search", "directory", "web", "tasks"],
     style: "balanced",
     baseline: 0.5,
     temperature: 0.4,
@@ -104,7 +105,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     summary: "Walks people through problems, patiently and step by step.",
     glyph: "bloom",
     color: "grass",
-    tools: ["history", "search"],
+    tools: ["history", "search", "web"],
     style: "concise",
     baseline: 0.3,
     temperature: 0.4,
@@ -117,7 +118,7 @@ export const SPECIALTY_PROFILES: Record<Specialty, SpecialtyProfile> = {
     summary: "Explains, reviews and writes code.",
     glyph: "prism",
     color: "clay",
-    tools: ["history", "search"],
+    tools: ["history", "search", "web"],
     style: "balanced",
     baseline: 0.62,
     temperature: 0.2,

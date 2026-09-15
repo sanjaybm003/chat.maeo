@@ -305,7 +305,9 @@ export type Database = {
           examples: Json;
           creativity: string;
           double_check: boolean;
-          visibility: "workspace" | "private";
+          visibility: "workspace" | "people" | "private";
+          /** Who among those who see it may use it: owner, people or viewers. */
+          usage: string;
           archived_at: string | null;
           created_at: string;
           updated_at: string;
@@ -330,7 +332,8 @@ export type Database = {
           examples?: Json;
           creativity?: string;
           double_check?: boolean;
-          visibility?: "workspace" | "private";
+          visibility?: "workspace" | "people" | "private";
+          usage?: string;
         };
         Update: {
           name?: string;
@@ -350,7 +353,8 @@ export type Database = {
           examples?: Json;
           creativity?: string;
           double_check?: boolean;
-          visibility?: "workspace" | "private";
+          visibility?: "workspace" | "people" | "private";
+          usage?: string;
           archived_at?: string | null;
         };
         Relationships: [];
@@ -496,6 +500,19 @@ export type Database = {
           last_delivered_at: string | null;
           last_status: number | null;
         };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      ai_agent_members: {
+        Row: {
+          agent_id: string;
+          user_id: string;
+          role: "viewer" | "user" | "editor";
+          added_by: string | null;
+          added_at: string;
+        };
+        /** Written only through set_agent_members. */
         Insert: never;
         Update: never;
         Relationships: [];
@@ -844,6 +861,14 @@ export type Database = {
           p_limit?: number;
         };
         Returns: SearchRow[];
+      };
+      set_agent_members: {
+        Args: { p_agent_id: string; p_members: Json };
+        Returns: { agent_id: string; user_id: string; role: "viewer" | "user" | "editor"; added_by: string | null; added_at: string }[];
+      };
+      agent_access: {
+        Args: { p_agent_id: string };
+        Returns: string;
       };
     };
     Enums: {

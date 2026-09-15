@@ -8,6 +8,7 @@ import { PREFERENCES_STORAGE_KEY } from "@/lib/theme-script";
 
 export type ThemePreference = "light" | "dark" | "system";
 export type ChatPattern = "dots" | "grid" | "plus" | "zigzag" | "plain";
+export type TaskLayout = "list" | "board";
 
 export interface Preferences {
   theme: ThemePreference;
@@ -15,6 +16,7 @@ export interface Preferences {
   sound: boolean;
   desktopNotifications: boolean;
   enterToSend: boolean;
+  taskLayout: TaskLayout;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -23,6 +25,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sound: true,
   desktopNotifications: false,
   enterToSend: true,
+  taskLayout: "list",
 };
 
 const CHANGE_EVENT = "maeosan:preferences-change";

@@ -5,11 +5,11 @@ import type { Agent } from "@/types/domain";
 
 import { AgentAvatar } from "./agent-avatar";
 
-/** Active agents matching what's typed after "@": handle prefix first, then name prefix, then anywhere. */
-export function matchAgents(agents: Record<string, Agent>, query: string, limit = 6): Agent[] {
+/** Active agents this person may use, matching what's typed after "@": handle prefix first, then name prefix, then anywhere. */
+export function matchAgents(agents: Record<string, Agent>, query: string, limit = 6, canUse: (agent: Agent) => boolean = () => true): Agent[] {
   const q = query.toLowerCase();
   return Object.values(agents)
-    .filter((agent) => !agent.archivedAt)
+    .filter((agent) => !agent.archivedAt && canUse(agent))
     .map((agent) => {
       const name = agent.name.toLowerCase();
       const score = agent.handle.startsWith(q) ? 0 : name.startsWith(q) ? 1 : agent.handle.includes(q) || name.includes(q) ? 2 : -1;

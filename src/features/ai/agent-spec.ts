@@ -114,7 +114,13 @@ export const agentInputSchema = z.object({
   starters: z.array(z.string().trim().min(1).max(120)).max(MAX_STARTERS),
   color: z.enum(PERSON_COLORS),
   glyph: z.enum(AGENT_GLYPHS),
-  visibility: z.enum(["workspace", "private"]),
+  visibility: z.enum(["workspace", "people", "private"]),
+  usage: z.enum(["owner", "people", "viewers"]).default("viewers"),
+  /** Everyone the agent is shared with; only its maker or an admin can change this. */
+  members: z
+    .array(z.object({ userId: z.uuid(), role: z.enum(["viewer", "user", "editor"]) }))
+    .max(100, "Share with up to 100 people.")
+    .default([]),
 });
 
 export type AgentInput = z.input<typeof agentInputSchema>;

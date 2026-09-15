@@ -145,7 +145,7 @@ export function CreditsSettings() {
         ) : null}
       </SettingsSection>
 
-      <SettingsSection title="Where it went" description={`By agent and by workspace, over the last ${range} days.`}>
+      <SettingsSection title="Where it went" description={`By model, agent and workspace, over the last ${range} days.`}>
         {summary ? <Breakdown summary={summary} /> : <div className="h-24 animate-pulse rounded-2xl bg-paper-2" />}
       </SettingsSection>
 
@@ -225,7 +225,8 @@ function Breakdown({ summary }: { summary: UsageSummary }) {
   const agents = useWorkspace((state) => state.agents);
   const byAgent = summary.agents.filter((row) => row.runs > 0);
   const byWorkspace = summary.workspaces.filter((row) => row.runs > 0);
-  if (byAgent.length === 0 && byWorkspace.length === 0) {
+  const byModel = summary.models.filter((row) => row.runs > 0).sort((a, b) => b.credits - a.credits);
+  if (byAgent.length === 0 && byWorkspace.length === 0 && byModel.length === 0) {
     return <p className="text-[13.5px] text-ink-3">Nothing to break down yet.</p>;
   }
   const agentMax = Math.max(...byAgent.map((row) => row.credits), 0);
@@ -250,6 +251,7 @@ function Breakdown({ summary }: { summary: UsageSummary }) {
 
   return (
     <div className="flex flex-col gap-8">
+      {byModel.length > 0 ? <ModelUsage buckets={byModel} /> : null}
       {byAgent.length > 0 ? (
         <div>
           <p className="mb-3 text-[13px] font-medium text-ink-2">Agents</p>
@@ -277,6 +279,72 @@ function Breakdown({ summary }: { summary: UsageSummary }) {
           </ul>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Which models did the work: each one's share of the credits, and what a reply cost overall. */
+function ModelUsage({ buckets }: { buckets: UsageSummary["models"] }) {
+  const credits = buckets.reduce((sum, bucket) => sum + bucket.credits, 0);
+  const runs = buckets.reduce((sum, bucket) => sum + bucket.runs, 0);
+  const top = buckets[0];
+  const topLabel = findModel(top.model)?.label ?? top.model;
+  const makers = new Set(buckets.map((bucket) => findModel(bucket.model)?.maker ?? bucket.model)).size;
+  const percent = (value: number) => (credits > 0 ? Math.round((value / credits) * 100) : 0);
+
+  return (
+    <div>
+      <p className="mb-3 text-[13px] font-medium text-ink-2">Models</p>
+      <dl className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <UsageTile label="Models used">{buckets.length}</UsageTile>
+        <UsageTile label="Makers">{makers}</UsageTile>
+        <UsageTile label="Most used">{topLabel}</UsageTile>
+        <UsageTile label="Credits a reply">{runs > 0 ? formatCredits(Math.round(credits / runs)) : "—"}</UsageTile>
+      </dl>
+      <ul className="flex flex-col gap-3.5">
+        {buckets.map((bucket) => {
+          const model = findModel(bucket.model);
+          return (
+            <li key={bucket.model} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-4">
+              <span className="flex min-w-0 items-center gap-2.5">
+                <span
+                  className="flex size-5 shrink-0 items-center justify-center rounded-[6px] bg-paper-3 font-mono text-[10px] font-semibold text-ink-2"
+                  aria-hidden="true"
+                >
+                  {(model?.maker ?? bucket.model).charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[13.5px] text-ink">{model?.label ?? bucket.model}</span>
+                  <span className="block truncate text-[11.5px] text-ink-3">
+                    {model ? `${model.maker} · ${TIER_LABELS[model.tier]}` : "No longer offered"}
+                  </span>
+                </span>
+              </span>
+              <span className="flex items-center gap-3">
+                <span className="min-w-0 flex-1">
+                  <ShareBar value={bucket.credits} max={top.credits} />
+                </span>
+                <span className="w-[92px] shrink-0 text-right font-mono text-[11.5px] tabular-nums text-ink-2 sm:w-[160px]">
+                  {percent(bucket.credits)}% · {formatCredits(bucket.credits)}
+                  <span className="hidden sm:inline"> · {pluralize(bucket.runs, "run")}</span>
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-3 text-[12px] text-ink-3">
+        {buckets.length === 1 ? `Every reply ran on ${topLabel}.` : `${topLabel} did ${percent(top.credits)}% of the work, measured in credits.`}
+      </p>
+    </div>
+  );
+}
+
+function UsageTile({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-line px-3 py-2.5">
+      <dt className="text-[11.5px] text-ink-3">{label}</dt>
+      <dd className="mt-0.5 truncate font-display text-[17px] font-semibold tracking-[-0.01em] text-ink">{children}</dd>
     </div>
   );
 }

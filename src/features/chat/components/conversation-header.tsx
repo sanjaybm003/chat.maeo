@@ -7,6 +7,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { IconArrowLeft, IconBell, IconBellOff, IconInfo, IconUserPlus } from "@/components/ui/icons";
 import { AgentAvatar } from "@/features/ai/components/agent-avatar";
 import { SPECIALTY_PROFILES } from "@/features/ai/specialties";
+import { MyWork } from "@/features/tasks/components/my-work";
 import { ConversationAvatar } from "@/features/workspace/components/conversation-avatar";
 import { setConversationMuted } from "@/features/workspace/api/conversations";
 import { useWorkspace, useWorkspaceStore } from "@/features/workspace/store/workspace-provider";
@@ -123,6 +124,7 @@ export function ConversationHeader({ conversation, detailsOpen, onToggleDetails 
       ) : null}
 
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        <MyWork conversation={conversation} />
         <IconButton label={conversation.muted ? "Unmute" : "Mute"} onClick={() => void toggleMute()} tooltipSide="bottom">
           {conversation.muted ? <IconBellOff /> : <IconBell />}
         </IconButton>
